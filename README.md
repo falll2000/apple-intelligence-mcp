@@ -159,6 +159,8 @@ You should NOT use it for:
 
 **`detect_trajectories`** requires a video file (mp4/mov) and works best with footage of objects following a parabolic path (sports, balls, etc.).
 
+**`vision_analyze(mode="body_pose_3d")`** is temporarily disabled and returns `unavailable`. `VNDetectHumanBodyPose3DRequest` can terminate the Swift Core process with an uncaught Objective-C exception during `perform`, before Swift can handle the error. Use `mode="body_pose"` for stable 2D pose detection.
+
 **Vision runtime tests** should be run from an Xcode-built binary, Terminal, or another unsandboxed local process. Sandboxed runners may produce false `CVPixelBuffer`, `ANECF`, or `request cancelled` errors.
 
 ---
