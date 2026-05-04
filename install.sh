@@ -42,14 +42,30 @@ info "macOS 版本確認（$(sw_vers -productVersion)）"
 command -v swift >/dev/null 2>&1 || error "找不到 Swift，請安裝 Xcode Command Line Tools：xcode-select --install"
 info "Swift 確認（$(swift --version 2>&1 | head -1)）"
 
-# Homebrew Python 確認
-PYTHON_BIN="/opt/homebrew/bin/python3"
-if [ ! -f "$PYTHON_BIN" ]; then
-    warn "找不到 Homebrew Python，嘗試安裝..."
-    command -v brew >/dev/null 2>&1 || error "找不到 Homebrew，請先安裝：https://brew.sh"
-    brew install python3
+# Foundation Models 巨集需要完整 Xcode（CLT 不夠）。
+# 如果 xcode-select 指向 CLT，找 /Applications 下的 Xcode 並設 DEVELOPER_DIR。
+ACTIVE_DEV="$(xcode-select -p 2>/dev/null || true)"
+if [[ "$ACTIVE_DEV" == *"CommandLineTools"* ]] || [ -z "$ACTIVE_DEV" ]; then
+    XCODE_APP="$(ls -d /Applications/Xcode*.app 2>/dev/null | head -1)"
+    [ -n "$XCODE_APP" ] || error "需要完整 Xcode（含 FoundationModels macros），CLT 不足。請從 App Store 安裝 Xcode。"
+    export DEVELOPER_DIR="$XCODE_APP/Contents/Developer"
+    info "偵測到 CLT，改用 Xcode：$DEVELOPER_DIR"
+else
+    info "DEVELOPER_DIR：$ACTIVE_DEV"
 fi
-info "Python 確認（$($PYTHON_BIN --version)）"
+
+# Python 確認（依序嘗試：homebrew → PATH 上的 python3，相容 pyenv/asdf）
+if [ -x "/opt/homebrew/bin/python3" ]; then
+    PYTHON_BIN="/opt/homebrew/bin/python3"
+elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python3)"
+else
+    warn "找不到 python3，嘗試以 Homebrew 安裝..."
+    command -v brew >/dev/null 2>&1 || error "找不到 Homebrew 或 python3，請先安裝其一：https://brew.sh"
+    brew install python3
+    PYTHON_BIN="/opt/homebrew/bin/python3"
+fi
+info "Python 確認（$PYTHON_BIN — $($PYTHON_BIN --version)）"
 
 # ── 2. 編譯 Swift Core Service ───────────────────────────────
 
