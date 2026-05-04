@@ -159,6 +159,8 @@ You should NOT use it for:
 
 **`detect_trajectories`** requires a video file (mp4/mov) and works best with footage of objects following a parabolic path (sports, balls, etc.).
 
+**Vision runtime tests** should be run from an Xcode-built binary, Terminal, or another unsandboxed local process. Sandboxed runners may produce false `CVPixelBuffer`, `ANECF`, or `request cancelled` errors.
+
 ---
 
 ## Start / stop (HTTP mode)
