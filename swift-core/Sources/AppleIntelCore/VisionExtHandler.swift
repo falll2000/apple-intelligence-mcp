@@ -32,10 +32,6 @@ final class ContinuationResumer<Success: Sendable>: @unchecked Sendable {
     }
 }
 
-func configureVisionRequest(_ request: VNRequest) {
-    request.usesCPUOnly = true
-}
-
 struct VisionExtHandler: Sendable {
 
     private func loadImageData(base64: String?, path: String?) throws -> Data {
@@ -54,6 +50,13 @@ struct VisionExtHandler: Sendable {
         VNImageRequestHandler(data: data, options: [:])
     }
 
+    private func imageHandler(base64: String?, path: String?) throws -> VNImageRequestHandler {
+        if let p = path {
+            return VNImageRequestHandler(url: URL(fileURLWithPath: p), options: [:])
+        }
+        return imageHandler(data: try loadImageData(base64: base64, path: nil))
+    }
+
     private func loadModel(from path: String) throws -> MLModel {
         let url = URL(fileURLWithPath: path)
         if url.pathExtension == "mlmodelc" {
@@ -65,10 +68,9 @@ struct VisionExtHandler: Sendable {
 
     // ── 圖片分類：這張圖片裡有什麼？ ─────────────────────────────
     func classifyImage(base64: String? = nil, path: String? = nil) async throws -> [(label: String, confidence: Float)] {
-        let imageData = try loadImageData(base64: base64, path: path)
+        let handler = try imageHandler(base64: base64, path: path)
         return try await withCheckedThrowingContinuation { continuation in
             let resumer = ContinuationResumer(continuation)
-            let handler = VNImageRequestHandler(data: imageData, options: [:])
             let request = VNClassifyImageRequest { req, error in
                 if let error = error { resumer.resume(throwing: error); return }
                 let results = (req.results as? [VNClassificationObservation] ?? [])
@@ -77,7 +79,6 @@ struct VisionExtHandler: Sendable {
                     .map { (label: $0.identifier, confidence: $0.confidence) }
                 resumer.resume(returning: Array(results))
             }
-            configureVisionRequest(request)
             do { try handler.perform([request]) }
             catch { resumer.resume(throwing: error) }
         }
@@ -90,10 +91,9 @@ struct VisionExtHandler: Sendable {
     }
 
     func detectFaces(base64: String? = nil, path: String? = nil) async throws -> FaceResult {
-        let imageData = try loadImageData(base64: base64, path: path)
+        let handler = try imageHandler(base64: base64, path: path)
         return try await withCheckedThrowingContinuation { continuation in
             let resumer = ContinuationResumer(continuation)
-            let handler = VNImageRequestHandler(data: imageData, options: [:])
             let request = VNDetectFaceRectanglesRequest { req, error in
                 if let error = error { resumer.resume(throwing: error); return }
                 let observations = req.results as? [VNFaceObservation] ?? []
@@ -109,7 +109,6 @@ struct VisionExtHandler: Sendable {
                 }
                 resumer.resume(returning: FaceResult(count: faces.count, faces: faces))
             }
-            configureVisionRequest(request)
             do { try handler.perform([request]) }
             catch { resumer.resume(throwing: error) }
         }
@@ -122,10 +121,9 @@ struct VisionExtHandler: Sendable {
     }
 
     func detectBarcodes(base64: String? = nil, path: String? = nil) async throws -> [BarcodeResult] {
-        let imageData = try loadImageData(base64: base64, path: path)
+        let handler = try imageHandler(base64: base64, path: path)
         return try await withCheckedThrowingContinuation { continuation in
             let resumer = ContinuationResumer(continuation)
-            let handler = imageHandler(data: imageData)
             let request = VNDetectBarcodesRequest { req, error in
                 if let error = error { resumer.resume(throwing: error); return }
                 let results = (req.results as? [VNBarcodeObservation] ?? [])
@@ -138,7 +136,6 @@ struct VisionExtHandler: Sendable {
                     }
                 resumer.resume(returning: results)
             }
-            configureVisionRequest(request)
             do { try handler.perform([request]) }
             catch { resumer.resume(throwing: error) }
         }
@@ -167,7 +164,6 @@ struct VisionExtHandler: Sendable {
                 }
                 resumer.resume(returning: result)
             }
-            configureVisionRequest(request)
             do { try handler.perform([request]) }
             catch { resumer.resume(throwing: error) }
         }
@@ -208,7 +204,6 @@ struct VisionExtHandler: Sendable {
                 resumer.resume(returning: results)
             }
             request.imageCropAndScaleOption = .scaleFill
-            configureVisionRequest(request)
             do { try handler.perform([request]) }
             catch { resumer.resume(throwing: error) }
         }
@@ -222,10 +217,9 @@ struct VisionExtHandler: Sendable {
     }
 
     func detectContours(base64: String? = nil, path: String? = nil) async throws -> ContourResult {
-        let imageData = try loadImageData(base64: base64, path: path)
+        let handler = try imageHandler(base64: base64, path: path)
         return try await withCheckedThrowingContinuation { continuation in
             let resumer = ContinuationResumer(continuation)
-            let handler = imageHandler(data: imageData)
             let request = VNDetectContoursRequest { req, error in
                 if let error = error { resumer.resume(throwing: error); return }
                 guard let obs = (req.results as? [VNContoursObservation])?.first else {
@@ -250,7 +244,6 @@ struct VisionExtHandler: Sendable {
             request.contrastAdjustment = 1.0
             request.detectsDarkOnLight = true
             request.maximumImageDimension = 1024
-            configureVisionRequest(request)
             do { try handler.perform([request]) }
             catch { resumer.resume(throwing: error) }
         }
@@ -263,10 +256,9 @@ struct VisionExtHandler: Sendable {
     }
 
     func detectTextRegions(base64: String? = nil, path: String? = nil) async throws -> TextRegionResult {
-        let imageData = try loadImageData(base64: base64, path: path)
+        let handler = try imageHandler(base64: base64, path: path)
         return try await withCheckedThrowingContinuation { continuation in
             let resumer = ContinuationResumer(continuation)
-            let handler = imageHandler(data: imageData)
             let request = VNDetectTextRectanglesRequest { req, error in
                 if let error = error { resumer.resume(throwing: error); return }
                 let observations = req.results as? [VNTextObservation] ?? []
@@ -283,7 +275,6 @@ struct VisionExtHandler: Sendable {
                 resumer.resume(returning: TextRegionResult(count: regions.count, regions: regions))
             }
             request.reportCharacterBoxes = true
-            configureVisionRequest(request)
             do { try handler.perform([request]) }
             catch { resumer.resume(throwing: error) }
         }
@@ -296,10 +287,9 @@ struct VisionExtHandler: Sendable {
     }
 
     func detectFaceLandmarks(base64: String? = nil, path: String? = nil) async throws -> FaceLandmarkResult {
-        let imageData = try loadImageData(base64: base64, path: path)
+        let handler = try imageHandler(base64: base64, path: path)
         return try await withCheckedThrowingContinuation { continuation in
             let resumer = ContinuationResumer(continuation)
-            let handler = imageHandler(data: imageData)
             let request = VNDetectFaceLandmarksRequest { req, error in
                 if let error = error { resumer.resume(throwing: error); return }
                 let observations = req.results as? [VNFaceObservation] ?? []
@@ -323,7 +313,6 @@ struct VisionExtHandler: Sendable {
                 }
                 resumer.resume(returning: FaceLandmarkResult(count: summaries.count, summaries: summaries))
             }
-            configureVisionRequest(request)
             do { try handler.perform([request]) }
             catch { resumer.resume(throwing: error) }
         }
@@ -336,10 +325,9 @@ struct VisionExtHandler: Sendable {
     }
 
     func detectHumanBodies(base64: String? = nil, path: String? = nil, upperBodyOnly: Bool = false) async throws -> HumanBodyResult {
-        let imageData = try loadImageData(base64: base64, path: path)
+        let handler = try imageHandler(base64: base64, path: path)
         return try await withCheckedThrowingContinuation { continuation in
             let resumer = ContinuationResumer(continuation)
-            let handler = imageHandler(data: imageData)
             let request = VNDetectHumanRectanglesRequest { req, error in
                 if let error = error { resumer.resume(throwing: error); return }
                 let observations = req.results as? [VNHumanObservation] ?? []
@@ -356,7 +344,6 @@ struct VisionExtHandler: Sendable {
                 resumer.resume(returning: HumanBodyResult(count: bodies.count, bodies: bodies))
             }
             request.upperBodyOnly = upperBodyOnly
-            configureVisionRequest(request)
             do { try handler.perform([request]) }
             catch { resumer.resume(throwing: error) }
         }
@@ -384,7 +371,6 @@ struct VisionExtHandler: Sendable {
                     isUtility: obs.isUtility
                 ))
             }
-            configureVisionRequest(request)
             do { try handler.perform([request]) }
             catch { resumer.resume(throwing: error) }
         }
@@ -408,7 +394,6 @@ struct VisionExtHandler: Sendable {
                     description: "偵測到 \(count) 個前景物件實例（可個別產生去背遮罩）"
                 ))
             }
-            configureVisionRequest(request)
             do { try handler.perform([request]) }
             catch { resumer.resume(throwing: error) }
         }
@@ -442,7 +427,6 @@ struct VisionExtHandler: Sendable {
                     description: "光流場 \(w)×\(h) 像素，每像素含 (dx,dy) 移動向量（2 通道 float32）"
                 ))
             }
-            configureVisionRequest(request)
             do { try handler.perform([request]) }
             catch { resumer.resume(throwing: error) }
         }
@@ -455,10 +439,9 @@ struct VisionExtHandler: Sendable {
     }
 
     func detectHorizon(base64: String? = nil, path: String? = nil) async throws -> HorizonResult {
-        let imageData = try loadImageData(base64: base64, path: path)
+        let handler = try imageHandler(base64: base64, path: path)
         return try await withCheckedThrowingContinuation { continuation in
             let resumer = ContinuationResumer(continuation)
-            let handler = imageHandler(data: imageData)
             let request = VNDetectHorizonRequest { req, error in
                 if let error = error { resumer.resume(throwing: error); return }
                 guard let obs = (req.results as? [VNHorizonObservation])?.first else {
@@ -472,7 +455,6 @@ struct VisionExtHandler: Sendable {
                 )
                 resumer.resume(returning: HorizonResult(angle: Double(obs.angle), transform: transform))
             }
-            configureVisionRequest(request)
             do { try handler.perform([request]) }
             catch { resumer.resume(throwing: error) }
         }

@@ -14,14 +14,16 @@ struct OCRHandler: Sendable {
 
     func recognizeText(fromPath path: String) async throws -> String {
         let url = URL(fileURLWithPath: path)
-        let data = try Data(contentsOf: url)
-        return try await recognizeText(from: data)
+        return try await recognizeText(from: VNImageRequestHandler(url: url, options: [:]))
     }
 
     private func recognizeText(from imageData: Data) async throws -> String {
+        return try await recognizeText(from: VNImageRequestHandler(data: imageData, options: [:]))
+    }
+
+    private func recognizeText(from requestHandler: VNImageRequestHandler) async throws -> String {
         return try await withCheckedThrowingContinuation { continuation in
             let resumer = ContinuationResumer(continuation)
-            let requestHandler = VNImageRequestHandler(data: imageData, options: [:])
             let request = VNRecognizeTextRequest { request, error in
                 if let error = error {
                     resumer.resume(throwing: error)
@@ -36,7 +38,6 @@ struct OCRHandler: Sendable {
             request.recognitionLevel = .accurate
             request.usesLanguageCorrection = true
             request.recognitionLanguages = ["zh-Hant", "zh-Hans", "en-US", "ja", "ko"]
-            configureVisionRequest(request)
 
             do {
                 try requestHandler.perform([request])

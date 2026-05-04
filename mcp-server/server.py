@@ -132,6 +132,7 @@ _VISION_MODES: dict[str, str] = {
     "segment_foreground": "segment_foreground_instances",
     "aesthetics": "score_image_aesthetics",
     "body_pose": "detect_body_pose",
+    "body_pose_3d": "detect_body_pose_3d",
     "hand_pose": "detect_hand_pose",
     "animals": "recognize_animals",
 }
@@ -170,6 +171,7 @@ async def vision_analyze(
       - "segment_foreground"— per-instance foreground masks
       - "aesthetics"        — aesthetic score 0–1 + utility-image flag
       - "body_pose"         — 2D body joints (15 keypoints)
+      - "body_pose_3d"      — 3D body joints (monocular depth)
       - "hand_pose"         — hand joints + left/right
       - "animals"           — cat / dog detection
 
