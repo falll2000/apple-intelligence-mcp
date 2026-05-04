@@ -6,7 +6,7 @@ import CoreML
 
 extension VNFeaturePrintObservation: @retroactive @unchecked Sendable {}
 
-private final class ContinuationResumer<Success: Sendable>: @unchecked Sendable {
+final class ContinuationResumer<Success: Sendable>: @unchecked Sendable {
     private let lock = NSLock()
     private var didResume = false
     private let continuation: CheckedContinuation<Success, Error>
@@ -30,6 +30,10 @@ private final class ContinuationResumer<Success: Sendable>: @unchecked Sendable 
         didResume = true
         continuation.resume(throwing: error)
     }
+}
+
+func configureVisionRequest(_ request: VNRequest) {
+    request.usesCPUOnly = true
 }
 
 struct VisionExtHandler: Sendable {
@@ -63,17 +67,19 @@ struct VisionExtHandler: Sendable {
     func classifyImage(base64: String? = nil, path: String? = nil) async throws -> [(label: String, confidence: Float)] {
         let imageData = try loadImageData(base64: base64, path: path)
         return try await withCheckedThrowingContinuation { continuation in
+            let resumer = ContinuationResumer(continuation)
             let handler = VNImageRequestHandler(data: imageData, options: [:])
             let request = VNClassifyImageRequest { req, error in
-                if let error = error { continuation.resume(throwing: error); return }
+                if let error = error { resumer.resume(throwing: error); return }
                 let results = (req.results as? [VNClassificationObservation] ?? [])
                     .filter { $0.confidence > 0.05 }
                     .prefix(10)
                     .map { (label: $0.identifier, confidence: $0.confidence) }
-                continuation.resume(returning: Array(results))
+                resumer.resume(returning: Array(results))
             }
+            configureVisionRequest(request)
             do { try handler.perform([request]) }
-            catch { continuation.resume(throwing: error) }
+            catch { resumer.resume(throwing: error) }
         }
     }
 
@@ -86,9 +92,10 @@ struct VisionExtHandler: Sendable {
     func detectFaces(base64: String? = nil, path: String? = nil) async throws -> FaceResult {
         let imageData = try loadImageData(base64: base64, path: path)
         return try await withCheckedThrowingContinuation { continuation in
+            let resumer = ContinuationResumer(continuation)
             let handler = VNImageRequestHandler(data: imageData, options: [:])
             let request = VNDetectFaceRectanglesRequest { req, error in
-                if let error = error { continuation.resume(throwing: error); return }
+                if let error = error { resumer.resume(throwing: error); return }
                 let observations = req.results as? [VNFaceObservation] ?? []
                 let faces = observations.map { obs in
                     let bb = obs.boundingBox
@@ -100,10 +107,11 @@ struct VisionExtHandler: Sendable {
                         confidence: obs.confidence
                     )
                 }
-                continuation.resume(returning: FaceResult(count: faces.count, faces: faces))
+                resumer.resume(returning: FaceResult(count: faces.count, faces: faces))
             }
+            configureVisionRequest(request)
             do { try handler.perform([request]) }
-            catch { continuation.resume(throwing: error) }
+            catch { resumer.resume(throwing: error) }
         }
     }
 
@@ -116,9 +124,10 @@ struct VisionExtHandler: Sendable {
     func detectBarcodes(base64: String? = nil, path: String? = nil) async throws -> [BarcodeResult] {
         let imageData = try loadImageData(base64: base64, path: path)
         return try await withCheckedThrowingContinuation { continuation in
+            let resumer = ContinuationResumer(continuation)
             let handler = imageHandler(data: imageData)
             let request = VNDetectBarcodesRequest { req, error in
-                if let error = error { continuation.resume(throwing: error); return }
+                if let error = error { resumer.resume(throwing: error); return }
                 let results = (req.results as? [VNBarcodeObservation] ?? [])
                     .compactMap { obs -> BarcodeResult? in
                         guard let value = obs.payloadStringValue else { return nil }
@@ -127,10 +136,11 @@ struct VisionExtHandler: Sendable {
                             symbology: obs.symbology.rawValue
                         )
                     }
-                continuation.resume(returning: results)
+                resumer.resume(returning: results)
             }
+            configureVisionRequest(request)
             do { try handler.perform([request]) }
-            catch { continuation.resume(throwing: error) }
+            catch { resumer.resume(throwing: error) }
         }
     }
 
@@ -157,6 +167,7 @@ struct VisionExtHandler: Sendable {
                 }
                 resumer.resume(returning: result)
             }
+            configureVisionRequest(request)
             do { try handler.perform([request]) }
             catch { resumer.resume(throwing: error) }
         }
@@ -197,6 +208,7 @@ struct VisionExtHandler: Sendable {
                 resumer.resume(returning: results)
             }
             request.imageCropAndScaleOption = .scaleFill
+            configureVisionRequest(request)
             do { try handler.perform([request]) }
             catch { resumer.resume(throwing: error) }
         }
@@ -238,6 +250,7 @@ struct VisionExtHandler: Sendable {
             request.contrastAdjustment = 1.0
             request.detectsDarkOnLight = true
             request.maximumImageDimension = 1024
+            configureVisionRequest(request)
             do { try handler.perform([request]) }
             catch { resumer.resume(throwing: error) }
         }
@@ -270,6 +283,7 @@ struct VisionExtHandler: Sendable {
                 resumer.resume(returning: TextRegionResult(count: regions.count, regions: regions))
             }
             request.reportCharacterBoxes = true
+            configureVisionRequest(request)
             do { try handler.perform([request]) }
             catch { resumer.resume(throwing: error) }
         }
@@ -309,6 +323,7 @@ struct VisionExtHandler: Sendable {
                 }
                 resumer.resume(returning: FaceLandmarkResult(count: summaries.count, summaries: summaries))
             }
+            configureVisionRequest(request)
             do { try handler.perform([request]) }
             catch { resumer.resume(throwing: error) }
         }
@@ -341,6 +356,7 @@ struct VisionExtHandler: Sendable {
                 resumer.resume(returning: HumanBodyResult(count: bodies.count, bodies: bodies))
             }
             request.upperBodyOnly = upperBodyOnly
+            configureVisionRequest(request)
             do { try handler.perform([request]) }
             catch { resumer.resume(throwing: error) }
         }
@@ -368,6 +384,7 @@ struct VisionExtHandler: Sendable {
                     isUtility: obs.isUtility
                 ))
             }
+            configureVisionRequest(request)
             do { try handler.perform([request]) }
             catch { resumer.resume(throwing: error) }
         }
@@ -391,6 +408,7 @@ struct VisionExtHandler: Sendable {
                     description: "偵測到 \(count) 個前景物件實例（可個別產生去背遮罩）"
                 ))
             }
+            configureVisionRequest(request)
             do { try handler.perform([request]) }
             catch { resumer.resume(throwing: error) }
         }
@@ -424,6 +442,7 @@ struct VisionExtHandler: Sendable {
                     description: "光流場 \(w)×\(h) 像素，每像素含 (dx,dy) 移動向量（2 通道 float32）"
                 ))
             }
+            configureVisionRequest(request)
             do { try handler.perform([request]) }
             catch { resumer.resume(throwing: error) }
         }
@@ -453,6 +472,7 @@ struct VisionExtHandler: Sendable {
                 )
                 resumer.resume(returning: HorizonResult(angle: Double(obs.angle), transform: transform))
             }
+            configureVisionRequest(request)
             do { try handler.perform([request]) }
             catch { resumer.resume(throwing: error) }
         }
