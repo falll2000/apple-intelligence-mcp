@@ -81,72 +81,73 @@ swift-core/AppleIntelCore   ← persistent process, frameworks loaded once
 
 ---
 
-## Tools (34 total)
+## Tools (16 total)
+
+The 18 single-image Vision capabilities are routed through one tool (`vision_analyze`) with a `mode` parameter, instead of 18 individual tools — this measurably improves host-LLM tool-selection accuracy.
 
 ### Foundation Models — on-device LLM
 
 | Tool | Description |
 |------|-------------|
-| `generate_text` | General text generation, summarisation, rewriting |
-| `translate_text` | Translation between languages (offline) |
-| `generate_text_structured` | Guided generation — guaranteed JSON output. Schemas: `list` / `classify` / `summarize` / `extract` / `qa` |
+| `generate_text` | General text generation / rewriting on the local LLM |
+| `generate_text_structured` | Guided generation — guaranteed JSON. Schemas: `list` / `classify` / `summarize` / `extract` / `qa` |
+| `translate_text` | Translation between zh-Hant / zh-Hans / en / ja / ko / fr / de / es |
 
-### Vision — image analysis
+### Vision — image / pose
 
 | Tool | Description |
 |------|-------------|
-| `ocr_image` | Extract text from images (zh-Hant/zh-Hans/en/ja/ko) |
-| `classify_image` | Scene/object classification with confidence scores |
-| `detect_faces` | Face detection — count + bounding boxes |
-| `detect_face_landmarks` | Facial landmark points (eyes, nose, mouth, contour) |
-| `detect_face_capture_quality` | *(coming soon)* |
-| `detect_barcodes` | QR Code, EAN-13, Code-128, PDF417, and more |
-| `detect_objects` | Object detection with a custom Core ML model |
-| `detect_text_regions` | Find text regions without OCR (bounding boxes only) |
-| `detect_contours` | Edge and contour detection |
-| `detect_human_bodies` | Human body bounding boxes (`upper_body_only` option) |
-| `detect_rectangles` | Detect rectangular regions (cards, screens, whiteboards) |
-| `detect_horizon` | Horizon angle — detect if a photo is tilted |
-| `detect_saliency` | Attention-based saliency — what draws the human eye |
-| `detect_document` | Document / paper detection and bounding box |
+| `vision_analyze` | One router for 18 single-image tasks. `mode` ∈ {`ocr`, `classify`, `faces`, `face_landmarks`, `barcodes`, `text_regions`, `contours`, `human_bodies`, `rectangles`, `horizon`, `saliency`, `document`, `segment_person`, `segment_foreground`, `aesthetics`, `body_pose`, `hand_pose`, `animals`} |
+| `image_similarity` | Visual similarity score between two image files |
 | `detect_optical_flow` | Per-pixel motion vectors between two frames |
-| `segment_person` | Person segmentation — detect presence + mask size |
-| `segment_foreground_instances` | Per-instance foreground segmentation |
-| `image_similarity` | Visual similarity score between two images |
-| `score_image_aesthetics` | Aesthetic quality score + utility image detection |
-
-### Vision — pose & motion
-
-| Tool | Description |
-|------|-------------|
-| `detect_body_pose` | 2D body joint positions (15 keypoints) |
-| `detect_hand_pose` | Hand joint positions + left/right classification |
-| `detect_body_pose_3d` | 3D body joint world coordinates |
-| `detect_trajectories` | Parabolic trajectory detection from video |
-| `recognize_animals` | Cat / dog detection with confidence |
+| `detect_trajectories` | Parabolic trajectory detection from a video file |
+| `detect_objects` | Object detection with a user-supplied Core ML model |
 
 ### Natural Language
 
 | Tool | Description |
 |------|-------------|
-| `analyze_text` | Sentiment score, language detection, NER (person/place/org), keywords |
-| `tokenize_text` | Tokenise by word / sentence / paragraph |
-| `tag_parts_of_speech` | POS tagging (noun, verb, adjective…) |
-| `lemmatize_text` | Lemmatisation — reduce words to base form |
+| `analyze_text` | Sentiment + language detection + NER + keywords |
+| `tokenize_text` | Split into words / sentences / paragraphs |
+| `tag_parts_of_speech` | POS tagging |
+| `lemmatize_text` | Reduce words to base form |
 | `word_similarity` | Semantic similarity between two words (0–1) |
 | `sentence_similarity` | Semantic similarity between two sentences (0–1) |
 
-### Speech
+### Speech & Sound
 
 | Tool | Description |
 |------|-------------|
-| `transcribe_audio` | Offline speech-to-text (zh-TW/zh-CN/en-US/ja-JP…) |
+| `transcribe_audio` | Offline speech-to-text (zh-TW / zh-CN / en-US / ja-JP / ...) |
+| `classify_sound` | Classify ambient sound (music, laughter, dog bark, ...) |
 
-### Sound Analysis
+---
 
-| Tool | Description |
-|------|-------------|
-| `classify_sound` | Classify audio — music, speech, laughter, dog bark, etc. |
+## Recommended host system prompt
+
+The host model decides whether to call these tools based on its system prompt and the tool descriptions. Tool descriptions in this server are written in `WHEN: / NOT FOR:` format to help, but the host needs a clear policy too. Paste this into your client's system prompt to make routing reliable:
+
+```
+You have access to an `apple-intelligence` MCP server that runs entirely on the
+user's Mac. You MUST prefer it for the following task types instead of doing
+the work yourself:
+
+  - User provides an absolute path to an image file → call `vision_analyze`
+    with the appropriate mode. Do NOT describe the image yourself first.
+  - User provides an absolute path to an audio file and wants the words →
+    call `transcribe_audio`.
+  - User asks for sentiment / NER / tokenization / POS / lemmatization /
+    word or sentence similarity → call the matching tool.
+  - User asks to compare two images → `image_similarity`.
+
+You MAY use it (caller's discretion) for:
+  - Bulk text rewriting / translation where token cost matters more than nuance
+    → `generate_text`, `translate_text`, `generate_text_structured`.
+
+You should NOT use it for:
+  - Tasks needing strong reasoning, code, math, or current-events knowledge —
+    the on-device model is small. Use your own generation.
+```
 
 ---
 
@@ -157,8 +158,6 @@ swift-core/AppleIntelCore   ← persistent process, frameworks loaded once
 **`detect_objects`** requires a user-supplied Core ML model (`.mlmodel` or `.mlmodelc`). All other tools work out of the box.
 
 **`detect_trajectories`** requires a video file (mp4/mov) and works best with footage of objects following a parabolic path (sports, balls, etc.).
-
-**`detect_body_pose_3d`** uses monocular depth estimation — no LiDAR required, but accuracy improves with clear full-body shots.
 
 ---
 
