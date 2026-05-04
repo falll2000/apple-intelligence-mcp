@@ -83,7 +83,7 @@ swift-core/AppleIntelCore   ← persistent process, frameworks loaded once
 
 ## Tools (16 total)
 
-The 18 single-image Vision capabilities are routed through one tool (`vision_analyze`) with a `mode` parameter, instead of 18 individual tools — this measurably improves host-LLM tool-selection accuracy.
+The 19 single-image Vision capabilities are routed through one tool (`vision_analyze`) with a `mode` parameter, instead of 19 individual tools — this measurably improves host-LLM tool-selection accuracy.
 
 ### Foundation Models — on-device LLM
 
@@ -97,7 +97,7 @@ The 18 single-image Vision capabilities are routed through one tool (`vision_ana
 
 | Tool | Description |
 |------|-------------|
-| `vision_analyze` | One router for 18 single-image tasks. `mode` ∈ {`ocr`, `classify`, `faces`, `face_landmarks`, `barcodes`, `text_regions`, `contours`, `human_bodies`, `rectangles`, `horizon`, `saliency`, `document`, `segment_person`, `segment_foreground`, `aesthetics`, `body_pose`, `hand_pose`, `animals`} |
+| `vision_analyze` | One router for 19 single-image tasks. `mode` ∈ {`ocr`, `classify`, `faces`, `face_landmarks`, `barcodes`, `text_regions`, `contours`, `human_bodies`, `rectangles`, `horizon`, `saliency`, `document`, `segment_person`, `segment_foreground`, `aesthetics`, `body_pose`, `body_pose_3d`, `hand_pose`, `animals`} |
 | `image_similarity` | Visual similarity score between two image files |
 | `detect_optical_flow` | Per-pixel motion vectors between two frames |
 | `detect_trajectories` | Parabolic trajectory detection from a video file |

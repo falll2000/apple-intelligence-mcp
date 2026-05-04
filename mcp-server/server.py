@@ -171,6 +171,7 @@ async def vision_analyze(
       - "segment_foreground"— per-instance foreground masks
       - "aesthetics"        — aesthetic score 0–1 + utility-image flag
       - "body_pose"         — 2D body joints (15 keypoints)
+      - "body_pose_3d"      — 3D body joints (monocular depth)
       - "hand_pose"         — hand joints + left/right
       - "animals"           — cat / dog detection
 
