@@ -8,8 +8,7 @@ import simd
 struct VisionPoseHandler: Sendable {
 
     private func imageHandler(path: String) throws -> VNImageRequestHandler {
-        let data = try Data(contentsOf: URL(fileURLWithPath: path))
-        return VNImageRequestHandler(data: data, options: [:])
+        VNImageRequestHandler(url: URL(fileURLWithPath: path), options: [:])
     }
 
     // ── 人體姿態偵測（Body Pose）────────────────────────────
@@ -46,7 +45,6 @@ struct VisionPoseHandler: Sendable {
                     }
                     resumer.resume(returning: results)
                 }
-                configureVisionRequest(request)
                 try handler.perform([request])
             } catch { resumer.resume(throwing: error) }
         }
@@ -87,7 +85,6 @@ struct VisionPoseHandler: Sendable {
                     resumer.resume(returning: results)
                 }
                 request.maximumHandCount = 2
-                configureVisionRequest(request)
                 try handler.perform([request])
             } catch { resumer.resume(throwing: error) }
         }
@@ -118,7 +115,6 @@ struct VisionPoseHandler: Sendable {
                     }
                     resumer.resume(returning: results)
                 }
-                configureVisionRequest(request)
                 try handler.perform([request])
             } catch { resumer.resume(throwing: error) }
         }
@@ -150,7 +146,6 @@ struct VisionPoseHandler: Sendable {
                     resumer.resume(returning: results)
                 }
                 request.maximumObservations = 10
-                configureVisionRequest(request)
                 try handler.perform([request])
             } catch { resumer.resume(throwing: error) }
         }
@@ -175,7 +170,6 @@ struct VisionPoseHandler: Sendable {
                     }
                     resumer.resume(returning: regions.joined(separator: "；"))
                 }
-                configureVisionRequest(request)
                 try handler.perform([request])
             } catch { resumer.resume(throwing: error) }
         }
@@ -200,7 +194,6 @@ struct VisionPoseHandler: Sendable {
                     resumer.resume(returning: "偵測到人物，遮罩尺寸：\(width)×\(height) 像素")
                 }
                 request.qualityLevel = .balanced
-                configureVisionRequest(request)
                 try handler.perform([request])
             } catch { resumer.resume(throwing: error) }
         }
@@ -221,7 +214,6 @@ struct VisionPoseHandler: Sendable {
                     let bb = obs.boundingBox
                     resumer.resume(returning: String(format: "偵測到文件，位置(%.2f,%.2f) 大小(%.2fx%.2f) 信心%.0f%%", bb.origin.x, bb.origin.y, bb.size.width, bb.size.height, obs.confidence * 100))
                 }
-                configureVisionRequest(request)
                 try handler.perform([request])
             } catch { resumer.resume(throwing: error) }
         }
@@ -229,9 +221,39 @@ struct VisionPoseHandler: Sendable {
 
     // ── 3D 人體姿態偵測（macOS 14+）────────────────────────────
     func detectBodyPose3D(imagePath: String) async throws -> [[String: String]] {
-        throw HandlerError.unavailable(
-            "detect_body_pose_3d 暫時停用：Apple Vision 的 VNDetectHumanBodyPose3DRequest 在此 macOS/Vision runtime 會丟出不可由 Swift do/catch 捕捉的 Objective-C exception，為避免 Swift Core process 崩潰，請改用 mode=\"body_pose\"。"
-        )
+        let joints: [(VNHumanBodyPose3DObservation.JointName, String)] = [
+            (.centerHead, "頭中心"), (.topHead, "頭頂"),
+            (.leftShoulder, "左肩"), (.rightShoulder, "右肩"),
+            (.leftElbow, "左手肘"), (.rightElbow, "右手肘"),
+            (.leftWrist, "左手腕"), (.rightWrist, "右手腕"),
+            (.root, "重心"),
+            (.leftHip, "左髖"), (.rightHip, "右髖"),
+            (.leftKnee, "左膝"), (.rightKnee, "右膝"),
+            (.leftAnkle, "左腳踝"), (.rightAnkle, "右腳踝")
+        ]
+        return try await withCheckedThrowingContinuation { continuation in
+            let resumer = ContinuationResumer(continuation)
+            do {
+                let handler = try imageHandler(path: imagePath)
+                let request = VNDetectHumanBodyPose3DRequest { req, error in
+                    if let error = error { resumer.resume(throwing: error); return }
+                    let observations = req.results as? [VNHumanBodyPose3DObservation] ?? []
+                    var results: [[String: String]] = []
+                    for (i, obs) in observations.enumerated() {
+                        var person: [String: String] = ["person": "\(i + 1)"]
+                        for (jointName, label) in joints {
+                            if let point = try? obs.recognizedPoint(jointName) {
+                                let col = point.position.columns.3
+                                person[label] = String(format: "(%.2f,%.2f,%.2f)", col.x, col.y, col.z)
+                            }
+                        }
+                        results.append(person)
+                    }
+                    resumer.resume(returning: results)
+                }
+                try handler.perform([request])
+            } catch { resumer.resume(throwing: error) }
+        }
     }
 
     // ── 軌跡偵測（視訊）：追蹤拋物線物體（macOS 11+）──────────
