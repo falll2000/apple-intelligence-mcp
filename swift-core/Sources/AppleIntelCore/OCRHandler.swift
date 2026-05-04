@@ -20,26 +20,28 @@ struct OCRHandler: Sendable {
 
     private func recognizeText(from imageData: Data) async throws -> String {
         return try await withCheckedThrowingContinuation { continuation in
+            let resumer = ContinuationResumer(continuation)
             let requestHandler = VNImageRequestHandler(data: imageData, options: [:])
             let request = VNRecognizeTextRequest { request, error in
                 if let error = error {
-                    continuation.resume(throwing: error)
+                    resumer.resume(throwing: error)
                     return
                 }
                 let observations = request.results as? [VNRecognizedTextObservation] ?? []
                 let lines = observations.compactMap { obs in
                     obs.topCandidates(1).first?.string
                 }
-                continuation.resume(returning: lines.joined(separator: "\n"))
+                resumer.resume(returning: lines.joined(separator: "\n"))
             }
             request.recognitionLevel = .accurate
             request.usesLanguageCorrection = true
             request.recognitionLanguages = ["zh-Hant", "zh-Hans", "en-US", "ja", "ko"]
+            configureVisionRequest(request)
 
             do {
                 try requestHandler.perform([request])
             } catch {
-                continuation.resume(throwing: error)
+                resumer.resume(throwing: error)
             }
         }
     }

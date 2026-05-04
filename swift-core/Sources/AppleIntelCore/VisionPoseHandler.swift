@@ -27,10 +27,11 @@ struct VisionPoseHandler: Sendable {
             (.root, "重心")
         ]
         return try await withCheckedThrowingContinuation { continuation in
+            let resumer = ContinuationResumer(continuation)
             do {
                 let handler = try imageHandler(path: imagePath)
                 let request = VNDetectHumanBodyPoseRequest { req, error in
-                    if let error = error { continuation.resume(throwing: error); return }
+                    if let error = error { resumer.resume(throwing: error); return }
                     let observations = req.results as? [VNHumanBodyPoseObservation] ?? []
                     var results: [[String: String]] = []
                     for (i, obs) in observations.enumerated() {
@@ -43,10 +44,11 @@ struct VisionPoseHandler: Sendable {
                         }
                         results.append(person)
                     }
-                    continuation.resume(returning: results)
+                    resumer.resume(returning: results)
                 }
+                configureVisionRequest(request)
                 try handler.perform([request])
-            } catch { continuation.resume(throwing: error) }
+            } catch { resumer.resume(throwing: error) }
         }
     }
 
@@ -62,10 +64,11 @@ struct VisionPoseHandler: Sendable {
             (.littleTip, "小指尖"), (.littleDIP, "小指DIP"), (.littlePIP, "小指PIP"), (.littleMCP, "小指MCP")
         ]
         return try await withCheckedThrowingContinuation { continuation in
+            let resumer = ContinuationResumer(continuation)
             do {
                 let handler = try imageHandler(path: imagePath)
                 let request = VNDetectHumanHandPoseRequest { req, error in
-                    if let error = error { continuation.resume(throwing: error); return }
+                    if let error = error { resumer.resume(throwing: error); return }
                     let observations = req.results as? [VNHumanHandPoseObservation] ?? []
                     var results: [[String: String]] = []
                     for (i, obs) in observations.enumerated() {
@@ -81,11 +84,12 @@ struct VisionPoseHandler: Sendable {
                         }
                         results.append(hand)
                     }
-                    continuation.resume(returning: results)
+                    resumer.resume(returning: results)
                 }
                 request.maximumHandCount = 2
+                configureVisionRequest(request)
                 try handler.perform([request])
-            } catch { continuation.resume(throwing: error) }
+            } catch { resumer.resume(throwing: error) }
         }
     }
 
@@ -98,10 +102,11 @@ struct VisionPoseHandler: Sendable {
 
     func recognizeAnimals(imagePath: String) async throws -> [AnimalResult] {
         return try await withCheckedThrowingContinuation { continuation in
+            let resumer = ContinuationResumer(continuation)
             do {
                 let handler = try imageHandler(path: imagePath)
                 let request = VNRecognizeAnimalsRequest { req, error in
-                    if let error = error { continuation.resume(throwing: error); return }
+                    if let error = error { resumer.resume(throwing: error); return }
                     let observations = req.results as? [VNRecognizedObjectObservation] ?? []
                     let results = observations.map { obs in
                         let bb = obs.boundingBox
@@ -111,10 +116,11 @@ struct VisionPoseHandler: Sendable {
                             boundingBox: (x: bb.origin.x, y: bb.origin.y, width: bb.size.width, height: bb.size.height)
                         )
                     }
-                    continuation.resume(returning: results)
+                    resumer.resume(returning: results)
                 }
+                configureVisionRequest(request)
                 try handler.perform([request])
-            } catch { continuation.resume(throwing: error) }
+            } catch { resumer.resume(throwing: error) }
         }
     }
 
@@ -127,10 +133,11 @@ struct VisionPoseHandler: Sendable {
 
     func detectRectangles(imagePath: String) async throws -> [RectResult] {
         return try await withCheckedThrowingContinuation { continuation in
+            let resumer = ContinuationResumer(continuation)
             do {
                 let handler = try imageHandler(path: imagePath)
                 let request = VNDetectRectanglesRequest { req, error in
-                    if let error = error { continuation.resume(throwing: error); return }
+                    if let error = error { resumer.resume(throwing: error); return }
                     let results = (req.results as? [VNRectangleObservation] ?? []).map { obs in
                         RectResult(
                             x: obs.boundingBox.origin.x,
@@ -140,11 +147,12 @@ struct VisionPoseHandler: Sendable {
                             confidence: obs.confidence
                         )
                     }
-                    continuation.resume(returning: results)
+                    resumer.resume(returning: results)
                 }
                 request.maximumObservations = 10
+                configureVisionRequest(request)
                 try handler.perform([request])
-            } catch { continuation.resume(throwing: error) }
+            } catch { resumer.resume(throwing: error) }
         }
     }
 
@@ -152,22 +160,24 @@ struct VisionPoseHandler: Sendable {
     // 找出圖片中最吸引視線的區域
     func detectSaliency(imagePath: String) async throws -> String {
         return try await withCheckedThrowingContinuation { continuation in
+            let resumer = ContinuationResumer(continuation)
             do {
                 let handler = try imageHandler(path: imagePath)
                 let request = VNGenerateAttentionBasedSaliencyImageRequest { req, error in
-                    if let error = error { continuation.resume(throwing: error); return }
+                    if let error = error { resumer.resume(throwing: error); return }
                     guard let obs = (req.results as? [VNSaliencyImageObservation])?.first,
                           let salientObjects = obs.salientObjects else {
-                        continuation.resume(returning: "無法偵測顯著區域")
+                        resumer.resume(returning: "無法偵測顯著區域")
                         return
                     }
                     let regions = salientObjects.map { obj in
                         String(format: "區域(%.2f,%.2f)大小(%.2fx%.2f)", obj.boundingBox.origin.x, obj.boundingBox.origin.y, obj.boundingBox.size.width, obj.boundingBox.size.height)
                     }
-                    continuation.resume(returning: regions.joined(separator: "；"))
+                    resumer.resume(returning: regions.joined(separator: "；"))
                 }
+                configureVisionRequest(request)
                 try handler.perform([request])
-            } catch { continuation.resume(throwing: error) }
+            } catch { resumer.resume(throwing: error) }
         }
     }
 
@@ -175,79 +185,53 @@ struct VisionPoseHandler: Sendable {
     // 回傳是否有人，以及覆蓋面積比例
     func segmentPerson(imagePath: String) async throws -> String {
         return try await withCheckedThrowingContinuation { continuation in
+            let resumer = ContinuationResumer(continuation)
             do {
                 let handler = try imageHandler(path: imagePath)
                 let request = VNGeneratePersonSegmentationRequest { req, error in
-                    if let error = error { continuation.resume(throwing: error); return }
+                    if let error = error { resumer.resume(throwing: error); return }
                     guard let obs = (req.results as? [VNPixelBufferObservation])?.first else {
-                        continuation.resume(returning: "未偵測到人物")
+                        resumer.resume(returning: "未偵測到人物")
                         return
                     }
                     let pixelBuffer = obs.pixelBuffer
                     let width = CVPixelBufferGetWidth(pixelBuffer)
                     let height = CVPixelBufferGetHeight(pixelBuffer)
-                    continuation.resume(returning: "偵測到人物，遮罩尺寸：\(width)×\(height) 像素")
+                    resumer.resume(returning: "偵測到人物，遮罩尺寸：\(width)×\(height) 像素")
                 }
                 request.qualityLevel = .balanced
+                configureVisionRequest(request)
                 try handler.perform([request])
-            } catch { continuation.resume(throwing: error) }
+            } catch { resumer.resume(throwing: error) }
         }
     }
 
     // ── 文件偵測（Document Detection）──────────────────────
     func detectDocument(imagePath: String) async throws -> String {
         return try await withCheckedThrowingContinuation { continuation in
+            let resumer = ContinuationResumer(continuation)
             do {
                 let handler = try imageHandler(path: imagePath)
                 let request = VNDetectDocumentSegmentationRequest { req, error in
-                    if let error = error { continuation.resume(throwing: error); return }
+                    if let error = error { resumer.resume(throwing: error); return }
                     guard let obs = (req.results as? [VNRectangleObservation])?.first else {
-                        continuation.resume(returning: "未偵測到文件")
+                        resumer.resume(returning: "未偵測到文件")
                         return
                     }
                     let bb = obs.boundingBox
-                    continuation.resume(returning: String(format: "偵測到文件，位置(%.2f,%.2f) 大小(%.2fx%.2f) 信心%.0f%%", bb.origin.x, bb.origin.y, bb.size.width, bb.size.height, obs.confidence * 100))
+                    resumer.resume(returning: String(format: "偵測到文件，位置(%.2f,%.2f) 大小(%.2fx%.2f) 信心%.0f%%", bb.origin.x, bb.origin.y, bb.size.width, bb.size.height, obs.confidence * 100))
                 }
+                configureVisionRequest(request)
                 try handler.perform([request])
-            } catch { continuation.resume(throwing: error) }
+            } catch { resumer.resume(throwing: error) }
         }
     }
 
     // ── 3D 人體姿態偵測（macOS 14+）────────────────────────────
     func detectBodyPose3D(imagePath: String) async throws -> [[String: String]] {
-        let joints: [(VNHumanBodyPose3DObservation.JointName, String)] = [
-            (.centerHead, "頭中心"), (.topHead, "頭頂"),
-            (.leftShoulder, "左肩"), (.rightShoulder, "右肩"),
-            (.leftElbow, "左手肘"), (.rightElbow, "右手肘"),
-            (.leftWrist, "左手腕"), (.rightWrist, "右手腕"),
-            (.root, "重心"),
-            (.leftHip, "左髖"), (.rightHip, "右髖"),
-            (.leftKnee, "左膝"), (.rightKnee, "右膝"),
-            (.leftAnkle, "左腳踝"), (.rightAnkle, "右腳踝")
-        ]
-        return try await withCheckedThrowingContinuation { continuation in
-            do {
-                let handler = try imageHandler(path: imagePath)
-                let request = VNDetectHumanBodyPose3DRequest { req, error in
-                    if let error = error { continuation.resume(throwing: error); return }
-                    let observations = req.results as? [VNHumanBodyPose3DObservation] ?? []
-                    var results: [[String: String]] = []
-                    for (i, obs) in observations.enumerated() {
-                        var person: [String: String] = ["person": "\(i + 1)"]
-                        for (jointName, label) in joints {
-                            if let point = try? obs.recognizedPoint(jointName) {
-                                // 從 4×4 世界座標矩陣取平移向量（最後一列）
-                                let col = point.position.columns.3
-                                person[label] = String(format: "(%.2f,%.2f,%.2f)", col.x, col.y, col.z)
-                            }
-                        }
-                        results.append(person)
-                    }
-                    continuation.resume(returning: results)
-                }
-                try handler.perform([request])
-            } catch { continuation.resume(throwing: error) }
-        }
+        throw HandlerError.unavailable(
+            "detect_body_pose_3d 暫時停用：Apple Vision 的 VNDetectHumanBodyPose3DRequest 在此 macOS/Vision runtime 會丟出不可由 Swift do/catch 捕捉的 Objective-C exception，為避免 Swift Core process 崩潰，請改用 mode=\"body_pose\"。"
+        )
     }
 
     // ── 軌跡偵測（視訊）：追蹤拋物線物體（macOS 11+）──────────
