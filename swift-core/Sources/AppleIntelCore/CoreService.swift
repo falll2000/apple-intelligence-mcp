@@ -30,10 +30,12 @@ struct CoreService {
             guard !line.isEmpty else { continue }
 
             let response: IPCResponse
+            var requestId = "unknown"
 
             do {
                 guard let data = line.data(using: .utf8) else { continue }
                 let request = try decoder.decode(IPCRequest.self, from: data)
+                requestId = request.id
                 response = try await handleRequest(
                     request,
                     generate: generateHandler,
@@ -48,7 +50,7 @@ struct CoreService {
                     nlAdvanced: nlAdvancedHandler
                 )
             } catch {
-                let fallback = IPCResponse.fail(id: "unknown", error: error.localizedDescription)
+                let fallback = IPCResponse.fail(id: requestId, error: error.localizedDescription)
                 if let data = try? encoder.encode(fallback),
                    let json = String(data: data, encoding: .utf8) {
                     print(json)
