@@ -221,39 +221,41 @@ struct VisionPoseHandler: Sendable {
 
     // ── 3D 人體姿態偵測（macOS 14+）────────────────────────────
     func detectBodyPose3D(imagePath: String) async throws -> [[String: String]] {
-        let joints: [(VNHumanBodyPose3DObservation.JointName, String)] = [
-            (.centerHead, "頭中心"), (.topHead, "頭頂"),
-            (.leftShoulder, "左肩"), (.rightShoulder, "右肩"),
-            (.leftElbow, "左手肘"), (.rightElbow, "右手肘"),
-            (.leftWrist, "左手腕"), (.rightWrist, "右手腕"),
-            (.root, "重心"),
-            (.leftHip, "左髖"), (.rightHip, "右髖"),
-            (.leftKnee, "左膝"), (.rightKnee, "右膝"),
-            (.leftAnkle, "左腳踝"), (.rightAnkle, "右腳踝")
-        ]
-        return try await withCheckedThrowingContinuation { continuation in
-            let resumer = ContinuationResumer(continuation)
-            do {
-                let handler = try imageHandler(path: imagePath)
-                let request = VNDetectHumanBodyPose3DRequest { req, error in
-                    if let error = error { resumer.resume(throwing: error); return }
-                    let observations = req.results as? [VNHumanBodyPose3DObservation] ?? []
-                    var results: [[String: String]] = []
-                    for (i, obs) in observations.enumerated() {
-                        var person: [String: String] = ["person": "\(i + 1)"]
-                        for (jointName, label) in joints {
-                            if let point = try? obs.recognizedPoint(jointName) {
-                                let col = point.position.columns.3
-                                person[label] = String(format: "(%.2f,%.2f,%.2f)", col.x, col.y, col.z)
-                            }
-                        }
-                        results.append(person)
-                    }
-                    resumer.resume(returning: results)
-                }
-                try handler.perform([request])
-            } catch { resumer.resume(throwing: error) }
-        }
+        // FIXME: Re-enable only after isolating or fixing the Vision runtime crash.
+        // Tested with `arch -arm64 swift-core/.build/release/AppleIntelCore`
+        // and tool `detect_body_pose_3d` on `test-assets/horizon.png`: constructing
+        // and performing `VNDetectHumanBodyPose3DRequest` terminates the process
+        // with uncaught `NSException` (exit -6), so Swift `do/catch` cannot recover.
+        // With this guard in place, the tool returns `unavailable` and the process
+        // stays alive for subsequent requests.
+        // Notes from follow-up triage: ML Kit version issues, UI-thread updates, and
+        // SwiftData/CoreData conflicts do not apply here because this is a macOS CLI
+        // process using Apple Vision directly. The crash happens during `perform`,
+        // before this code maps `recognizedPoint` values into simd coordinates.
+        // Next investigation should run this request in an isolated subprocess and
+        // capture the full Objective-C exception name/reason; also try `usesCPUOnly`,
+        // explicit Vision request revisions, and a real full-body person image.
+        // 1. 先做 crash containment
+        //
+        //     因為 root cause 發生在 handler.perform([request])，而且是 uncaught NSException，主 Swift Core 不能直
+        //     接呼叫它。
+        //     操作上就是維持目前 unavailable guard，或把 VNDetectHumanBodyPose3DRequest 搬到獨立 subprocess。這一步
+        //     的目標是：不管 Vision runtime 怎麼炸，都不能拖垮 MCP 主服務。
+        // 2. 再做 root-cause investigation
+        //
+        //     在隔離測試程式裡重新啟用原始 request，逐項測：
+        //     usesCPUOnly = true
+        //     指定 request revision
+        //     換真人全身圖
+        //     抓完整 Objective-C exception name/reason
+        //     確認是否跟 ANE/backend、圖片內容、request revision、或 macOS Vision runtime 有關
+        //
+        // 所以現在的程式碼 guard 是第 1 步。
+        // 後續如果要真的修 3D pose，不能直接把原本實作放回主 process，應該先建一個 isolated probe/subprocess，讓它
+        // 專門測 VNDetectHumanBodyPose3DRequest。
+        throw HandlerError.unavailable(
+            "detect_body_pose_3d 暫時停用：Apple Vision 的 VNDetectHumanBodyPose3DRequest 在此 macOS/Vision runtime 會丟出不可由 Swift do/catch 捕捉的 Objective-C exception，為避免 Swift Core process 崩潰，請改用 mode=\"body_pose\"。"
+        )
     }
 
     // ── 軌跡偵測（視訊）：追蹤拋物線物體（macOS 11+）──────────
