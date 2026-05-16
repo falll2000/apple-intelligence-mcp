@@ -81,7 +81,7 @@ swift-core/AppleIntelCore   ← persistent process, frameworks loaded once
 
 ---
 
-## Tools (18 total)
+## Tools (21 total)
 
 The 19 single-image Vision capabilities are routed through one tool (`vision_analyze`) with a `mode` parameter, instead of 19 individual tools — this measurably improves host-LLM tool-selection accuracy.
 
@@ -92,6 +92,9 @@ The 19 single-image Vision capabilities are routed through one tool (`vision_ana
 | `generate_text` | General text generation / rewriting on the local LLM |
 | `generate_text_structured` | Guided generation — guaranteed JSON. Schemas: `list` / `classify` / `summarize` / `extract` / `qa` |
 | `translate_text` | Translation between zh-Hant / zh-Hans / en / ja / ko / fr / de / es |
+| `proofread_text` | Fix typos / grammar / punctuation in user-supplied text. Preserves tone, language, and Discord syntax (@mentions, :emoji:, code blocks) |
+| `rewrite_text` | Rewrite text in a different tone (`formal` / `casual` / `concise` / `friendly` / `professional`) while preserving meaning, language, and Discord syntax |
+| `summarize_text` | Condense text to short / medium / long prose. Same-language in/out (zh→zh, en→en) |
 
 ### Vision — image / pose
 
@@ -145,6 +148,14 @@ the work yourself:
   - User asks to compare two images → `image_similarity`.
   - User asks to read text aloud → call `synthesize_speech` and attach
     the returned `.wav` path to the response.
+  - User has already-written text and asks to "check / fix typos /
+    proofread" it → call `proofread_text` (NOT `generate_text`).
+  - User has already-written text and asks to make it "formal / casual /
+    shorter / friendlier / more professional" → call `rewrite_text` with
+    the matching `tone`.
+  - User has long text and asks to "summarize / TL;DR / shorten" → call
+    `summarize_text`. Use `generate_text_structured(schema="summarize")`
+    only when the caller needs JSON with `title` + `keyPoints[]`.
 
 You MAY use it (caller's discretion) for:
   - Bulk text rewriting / translation where token cost matters more than nuance
@@ -172,6 +183,9 @@ NLEmbedding frameworks are essentially English-only on this stack.
 | `lemmatize_text` | ✓ correctly a no-op (Chinese has no inflection) |
 | `generate_text_structured` (`classify`) | ✓ usable for sentiment |
 | `translate_text` | ✓ zh→en/zh→ja reliable, en→zh uses standard localized brand forms (蘋果商店, 特斯拉); idioms translate literally |
+| `proofread_text` | ⚠ language preserved correctly; FM misses some zh grammar errors (一各/再/的-vs-得) and some en subject-verb agreement |
+| `rewrite_text` | ✓ language preserved; `professional` / `concise` / `formal` stable; `casual` / `friendly` occasionally paraphrases beyond original meaning |
+| `summarize_text` | ✓ language preserved (zh→zh, en→en); `short` length sometimes loose |
 | `generate_text` | ⚠ short prompts OK, knowledge cutoff is ~2023 |
 | `classify_sound` | ⚠ language-agnostic but ranking can be off |
 | `analyze_text` | ✗ sentiment always 0/中性, NER misses Chinese entities |
@@ -258,6 +272,7 @@ apple-intelligence-mcp/
 │       ├── NLAdvancedHandler.swift # tokenize/POS/lemma
 │       ├── NLEmbeddingHandler.swift # word/sentence similarity
 │       ├── TranslateHandler.swift
+│       ├── WritingToolsHandler.swift # proofread/rewrite/summarize
 │       ├── TranscribeHandler.swift
 │       ├── SoundHandler.swift
 │       ├── VisionExtHandler.swift  # Vision image tools
