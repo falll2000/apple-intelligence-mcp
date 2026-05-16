@@ -26,6 +26,8 @@ struct TranscribeHandler: Sendable {
 
         let request = SFSpeechURLRecognitionRequest(url: audioURL)
         request.shouldReportPartialResults = false
+        request.addsPunctuation = true
+        request.taskHint = .dictation
 
         return try await withCheckedThrowingContinuation { continuation in
             recognizer.recognitionTask(with: request) { result, error in
