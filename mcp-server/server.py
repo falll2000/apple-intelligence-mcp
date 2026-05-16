@@ -442,6 +442,67 @@ async def classify_sound(audio_path: str) -> dict:
     return _unwrap(await bridge.call("classify_sound", {"audio_path": audio_path}))
 
 
+@mcp.tool()
+async def synthesize_speech(
+    text: str,
+    voice: str = "",
+    rate: float = 0.0,
+    output_path: str = "",
+) -> dict:
+    """
+    Offline text-to-speech via macOS AVSpeechSynthesizer. Writes a .wav file.
+
+    WHEN: user asks to read text aloud, generate voice/audio from text, or wants
+    a spoken version of a message — and you need a local audio file (e.g. to
+    attach to Discord). 100% on-device, no API key required.
+
+    NOT FOR: cloning a specific person's voice, generating singing, or
+    high-fidelity production-grade narration — use a cloud TTS for those.
+
+    Args:
+        text: text to speak. Multi-language supported.
+        voice: optional. Either a voice identifier
+            (e.g. "com.apple.voice.compact.zh-TW.Meijia") OR a BCP-47 language
+            code (e.g. "zh-TW", "en-US", "ja-JP"). Empty → defaults to zh-TW
+            system voice. Use `list_voices` to discover identifiers.
+        rate: optional. 0.0–1.0. Empty/0 → system default (~0.5).
+        output_path: optional absolute path for the .wav. Empty → temp file,
+            actual path returned in the result.
+
+    Returns dict with: output_path, duration_seconds, voice_used.
+    """
+    params: dict = {"text": text}
+    if voice:
+        params["voice"] = voice
+    if rate and rate > 0:
+        params["rate"] = rate
+    if output_path:
+        params["output_path"] = output_path
+    return _unwrap(await bridge.call("synthesize_speech", params))
+
+
+@mcp.tool()
+async def list_voices(language: str = "") -> dict:
+    """
+    List available macOS speech synthesis voices (helper for `synthesize_speech`).
+
+    WHEN: caller wants to discover voice identifiers to pass to
+    `synthesize_speech` — e.g. find all zh-TW voices, or pick a specific
+    English speaker.
+
+    Args:
+        language: optional BCP-47 prefix to filter (e.g. "zh", "en-US", "ja").
+            Empty → list all installed voices.
+
+    Returns dict with: count, voices (newline-separated
+    "identifier | language | name" lines).
+    """
+    params: dict = {}
+    if language:
+        params["language"] = language
+    return _unwrap(await bridge.call("list_voices", params))
+
+
 # ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import atexit

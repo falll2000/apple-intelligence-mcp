@@ -47,6 +47,14 @@ enum JSONValue: Codable, Sendable {
         return nil
     }
 
+    var doubleValue: Double? {
+        switch self {
+        case .double(let d): return d
+        case .int(let i): return Double(i)
+        default: return nil
+        }
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if let s = try? container.decode(String.self) { self = .string(s); return }

@@ -1,5 +1,6 @@
 import Foundation
 import FoundationModels
+import AVFoundation
 
 // MARK: - Apple Intelligence MCP Core Service
 // 透過 stdin/stdout JSON line protocol 與 Python MCP server 溝通
@@ -17,6 +18,7 @@ struct CoreService {
         let soundHandler = SoundHandler()
         let visionPoseHandler = VisionPoseHandler()
         let nlAdvancedHandler = NLAdvancedHandler()
+        let speechSynthHandler = SpeechSynthHandler()
 
         let encoder = JSONEncoder()
         let decoder = JSONDecoder()
@@ -47,7 +49,8 @@ struct CoreService {
                     nlEmbedding: nlEmbeddingHandler,
                     sound: soundHandler,
                     visionPose: visionPoseHandler,
-                    nlAdvanced: nlAdvancedHandler
+                    nlAdvanced: nlAdvancedHandler,
+                    speechSynth: speechSynthHandler
                 )
             } catch {
                 let fallback = IPCResponse.fail(id: requestId, error: error.localizedDescription)
@@ -80,7 +83,8 @@ struct CoreService {
         nlEmbedding: NLEmbeddingHandler,
         sound: SoundHandler,
         visionPose: VisionPoseHandler,
-        nlAdvanced: NLAdvancedHandler
+        nlAdvanced: NLAdvancedHandler,
+        speechSynth: SpeechSynthHandler
     ) async throws -> IPCResponse {
 
         switch request.tool {
@@ -493,6 +497,41 @@ struct CoreService {
             let unit = request.params["unit"]?.stringValue ?? "word"
             let tokens = nlAdvanced.tokenize(text: text, unit: unit)
             return .ok(id: request.id, result: ["tokens": .string(tokens.joined(separator: " | ")), "count": .int(tokens.count)])
+
+        // ── synthesize_speech：文字 → 語音(本地 AVSpeechSynthesizer) ──
+        case "synthesize_speech":
+            guard let text = request.params["text"]?.stringValue else {
+                return .fail(id: request.id, error: "缺少 text")
+            }
+            let voice = request.params["voice"]?.stringValue
+            let rateValue = request.params["rate"]?.doubleValue.map { Float($0) }
+            let outputPath = request.params["output_path"]?.stringValue
+            let result = try await speechSynth.synthesize(
+                text: text,
+                voice: voice,
+                rate: rateValue,
+                outputPath: outputPath
+            )
+            return .ok(id: request.id, result: [
+                "output_path": .string(result.outputPath),
+                "duration_seconds": .double(result.durationSeconds),
+                "voice_used": .string(result.voiceUsed)
+            ])
+
+        // ── list_voices：列出可用 voice(輔助 synthesize_speech 選 voice) ──
+        case "list_voices":
+            let langFilter = request.params["language"]?.stringValue
+            let voices = AVSpeechSynthesisVoice.speechVoices().filter { v in
+                guard let f = langFilter, !f.isEmpty else { return true }
+                return v.language.hasPrefix(f)
+            }
+            let lines = voices.map { v in
+                "\(v.identifier) | \(v.language) | \(v.name)"
+            }
+            return .ok(id: request.id, result: [
+                "count": .int(voices.count),
+                "voices": .string(lines.joined(separator: "\n"))
+            ])
 
         // ── tag_parts_of_speech：詞性標注 ──
         case "tag_parts_of_speech":
