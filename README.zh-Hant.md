@@ -85,7 +85,7 @@ swift-core/AppleIntelCore   ← 常駐 process，frameworks 只載入一次
 
 ## 工具一覽（共 21 支）
 
-19 種單張圖片的 Vision 能力被收進一支 `vision_analyze`（以 `mode` 參數路由），而不是拆成 19 支。實測這樣做能明顯提升 host LLM 選工具的準確度。
+18 種單張圖片的 Vision 能力被收進一支 `vision_analyze`（以 `mode` 參數路由），而不是拆成 18 支。實測這樣做能明顯提升 host LLM 選工具的準確度。
 
 ### Foundation Models — 本地 LLM
 
@@ -102,7 +102,7 @@ swift-core/AppleIntelCore   ← 常駐 process，frameworks 只載入一次
 
 | 工具 | 說明 |
 |------|-------------|
-| `vision_analyze` | 19 種單張圖片任務的單一入口。`mode` ∈ {`ocr`, `classify`, `faces`, `face_landmarks`, `barcodes`, `text_regions`, `contours`, `human_bodies`, `rectangles`, `horizon`, `saliency`, `document`, `segment_person`, `segment_foreground`, `aesthetics`, `body_pose`, `body_pose_3d`, `hand_pose`, `animals`} |
+| `vision_analyze` | 18 種單張圖片任務的單一入口。`mode` ∈ {`ocr`, `classify`, `faces`, `face_landmarks`, `barcodes`, `text_regions`, `contours`, `human_bodies`, `rectangles`, `horizon`, `saliency`, `document`, `segment_person`, `segment_foreground`, `aesthetics`, `body_pose`, `hand_pose`, `animals`} |
 | `image_similarity` | 兩張圖檔的視覺相似度評分 |
 | `detect_optical_flow` | 兩個畫面間的每像素移動向量 |
 | `detect_trajectories` | 從影片中偵測拋物線軌跡 |
@@ -200,7 +200,7 @@ You should NOT use it for:
 
 **`detect_trajectories`** 需要影片檔（mp4 / mov），對拋物線運動（球類運動等）效果最好。
 
-**`vision_analyze(mode="body_pose_3d")`** 暫時停用，會回 `unavailable`。`VNDetectHumanBodyPose3DRequest` 在 `perform` 期間會用未捕獲的 Objective-C exception 終止 Swift Core process，Swift 端無法 catch。請用 `mode="body_pose"`（2D pose）做穩定的姿態偵測。
+**`body_pose_3d` 已從公開 mode 列表移除。** `VNDetectHumanBodyPose3DRequest` 在 `perform` 期間會用未捕獲的 Objective-C exception 終止 Swift Core process，Swift 端無法 catch。Swift case 仍保留作為安全網（過時 client 若還是傳這個 mode 會收到 `unavailable`），但不再對外宣告。請用 `mode="body_pose"`（2D pose）做穩定的姿態偵測。
 
 **Vision runtime 測試** 應該在 Xcode build 出來的 binary、Terminal 或其他非 sandbox 環境跑。Sandbox runner 會誤報 `CVPixelBuffer`、`ANECF`、`request cancelled` 之類的錯誤。
 

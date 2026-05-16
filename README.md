@@ -85,7 +85,7 @@ swift-core/AppleIntelCore   ← persistent process, frameworks loaded once
 
 ## Tools (21 total)
 
-The 19 single-image Vision capabilities are routed through one tool (`vision_analyze`) with a `mode` parameter, instead of 19 individual tools — this measurably improves host-LLM tool-selection accuracy.
+The 18 single-image Vision capabilities are routed through one tool (`vision_analyze`) with a `mode` parameter, instead of 18 individual tools — this measurably improves host-LLM tool-selection accuracy.
 
 ### Foundation Models — on-device LLM
 
@@ -102,7 +102,7 @@ The 19 single-image Vision capabilities are routed through one tool (`vision_ana
 
 | Tool | Description |
 |------|-------------|
-| `vision_analyze` | One router for 19 single-image tasks. `mode` ∈ {`ocr`, `classify`, `faces`, `face_landmarks`, `barcodes`, `text_regions`, `contours`, `human_bodies`, `rectangles`, `horizon`, `saliency`, `document`, `segment_person`, `segment_foreground`, `aesthetics`, `body_pose`, `body_pose_3d`, `hand_pose`, `animals`} |
+| `vision_analyze` | One router for 18 single-image tasks. `mode` ∈ {`ocr`, `classify`, `faces`, `face_landmarks`, `barcodes`, `text_regions`, `contours`, `human_bodies`, `rectangles`, `horizon`, `saliency`, `document`, `segment_person`, `segment_foreground`, `aesthetics`, `body_pose`, `hand_pose`, `animals`} |
 | `image_similarity` | Visual similarity score between two image files |
 | `detect_optical_flow` | Per-pixel motion vectors between two frames |
 | `detect_trajectories` | Parabolic trajectory detection from a video file |
@@ -204,7 +204,7 @@ LLM never tries to route Chinese requests to them.
 
 **`detect_trajectories`** requires a video file (mp4/mov) and works best with footage of objects following a parabolic path (sports, balls, etc.).
 
-**`vision_analyze(mode="body_pose_3d")`** is temporarily disabled and returns `unavailable`. `VNDetectHumanBodyPose3DRequest` can terminate the Swift Core process with an uncaught Objective-C exception during `perform`, before Swift can handle the error. Use `mode="body_pose"` for stable 2D pose detection.
+**`body_pose_3d` is removed from the public mode list.** `VNDetectHumanBodyPose3DRequest` terminates the Swift Core process with an uncaught Objective-C exception during `perform`, before Swift can handle the error. The Swift case still exists as a safety net (returns `unavailable` if a stale client tries the mode) but it's no longer advertised. Use `mode="body_pose"` for stable 2D pose detection.
 
 **Vision runtime tests** should be run from an Xcode-built binary, Terminal, or another unsandboxed local process. Sandboxed runners may produce false `CVPixelBuffer`, `ANECF`, or `request cancelled` errors.
 
