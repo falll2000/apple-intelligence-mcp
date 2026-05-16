@@ -93,38 +93,27 @@ http://127.0.0.1:11435/mcp
 
 ## 架構
 
-```
-┌────────────────────────────────────────────┐
-│       AI Client（Claude / GPT / 等）       │
-└──────────────────┬─────────────────────────┘
-                   │  MCP 協議
-                   │  （stdio 或 streamable-http :11435）
-                   ▼
-┌────────────────────────────────────────────┐
-│  Python FastMCP server                     │
-│  mcp-server/server.py                      │
-│  - 21 個 @mcp.tool 定義                    │
-│  - SwiftBridge：常駐 subprocess +          │
-│    async lock + JSON line protocol         │
-└──────────────────┬─────────────────────────┘
-                   │  stdin/stdout JSON lines
-                   │  （IPCRequest / IPCResponse）
-                   ▼
-┌────────────────────────────────────────────┐
-│  Swift Core Service（長命 process）        │
-│  swift-core/AppleIntelCore                 │
-│  - CoreService.swift（請求路由）            │
-│  - 各 domain handler（見「模組結構」）      │
-│  - Apple frameworks 啟動時載入一次          │
-└──────────────────┬─────────────────────────┘
-                   │
-                   ▼
-       FoundationModels  ←─ 本機 LLM（約 3B）
-       Vision            ←─ 18 種圖像/姿態任務
-       NaturalLanguage   ←─ 斷詞 / NER / POS …
-       Speech            ←─ 離線 STT
-       AVFoundation      ←─ 離線 TTS
-       SoundAnalysis     ←─ 環境音分類
+```mermaid
+flowchart TD
+    Client["<b>AI Client</b><br/>Claude / GPT / Gemini / 等"]
+    MCP["<b>Python FastMCP server</b><br/><code>mcp-server/server.py</code><br/>• 21 個 <code>@mcp.tool</code> 定義<br/>• SwiftBridge — 常駐 subprocess<br/>+ async lock + JSON line protocol"]
+    Swift["<b>Swift Core Service</b>（長命 process）<br/><code>swift-core/AppleIntelCore</code><br/>• <code>CoreService.swift</code> — 請求路由<br/>• 各 domain handler<br/>• Apple frameworks 啟動時載入一次"]
+
+    FM["<b>FoundationModels</b><br/>本機 LLM（約 3B）"]
+    Vis["<b>Vision</b><br/>18 種圖像 / 姿態任務"]
+    NL["<b>NaturalLanguage</b><br/>斷詞 / NER / POS …"]
+    Sp["<b>Speech</b><br/>離線 STT"]
+    AV["<b>AVFoundation</b><br/>離線 TTS"]
+    SA["<b>SoundAnalysis</b><br/>環境音分類"]
+
+    Client -- "MCP 協議<br/>（stdio 或 streamable-http :11435）" --> MCP
+    MCP -- "stdin/stdout JSON lines<br/>（IPCRequest / IPCResponse）" --> Swift
+    Swift --> FM
+    Swift --> Vis
+    Swift --> NL
+    Swift --> Sp
+    Swift --> AV
+    Swift --> SA
 ```
 
 **為什麼兩個 process？** FastMCP 是 Python 原生；Apple AI 框架只有 Swift 介面。
