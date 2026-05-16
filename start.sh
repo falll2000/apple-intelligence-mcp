@@ -1,39 +1,35 @@
 #!/bin/bash
-# Apple Intelligence MCP Server - 背景啟動
+# Apple Intelligence MCP Server - 啟動（launchd）
+#
+# 若已裝 hermes 整合，watchdog 也會一併啟動。
 
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PID_FILE="/tmp/apple-intel-mcp.pid"
-LOG_FILE="/tmp/apple-intel-mcp.log"
-PYTHON="$REPO_DIR/mcp-server/venv/bin/python3"
-SERVER="$REPO_DIR/mcp-server/server.py"
+PLIST_DIR="$HOME/Library/LaunchAgents"
+PLIST_MCP="$PLIST_DIR/com.apple-intel-mcp.server.plist"
+PLIST_WATCHDOG="$PLIST_DIR/com.apple-intel-mcp.hermes-watchdog.plist"
+DOMAIN="gui/$(id -u)"
+MCP_TARGET="${DOMAIN}/com.apple-intel-mcp.server"
+WATCHDOG_TARGET="${DOMAIN}/com.apple-intel-mcp.hermes-watchdog"
 
-# Foundation Models 巨集需要完整 Xcode；若 xcode-select 指向 CLT 自動切換
-if [[ "$(xcode-select -p 2>/dev/null)" == *"CommandLineTools"* ]]; then
-    XCODE_APP="$(ls -d /Applications/Xcode*.app 2>/dev/null | head -1)"
-    [ -n "$XCODE_APP" ] && export DEVELOPER_DIR="$XCODE_APP/Contents/Developer"
-fi
-
-# 已在執行中？
-if [ -f "$PID_FILE" ] && kill -0 "$(cat $PID_FILE)" 2>/dev/null; then
-    echo "✅ 服務已在執行中（PID: $(cat $PID_FILE)）"
-    echo "   MCP 位址：http://127.0.0.1:11435/mcp"
-    exit 0
-fi
-
-# 啟動
-echo "🚀 啟動 Apple Intelligence MCP Server..."
-nohup "$PYTHON" "$SERVER" > "$LOG_FILE" 2>&1 &
-echo $! > "$PID_FILE"
-
-# 等待服務就緒
-sleep 2
-if kill -0 "$(cat $PID_FILE)" 2>/dev/null; then
-    echo "✅ 服務已在背景執行（PID: $(cat $PID_FILE)）"
-    echo "   MCP 位址：http://127.0.0.1:11435/mcp"
-    echo "   日誌：tail -f $LOG_FILE"
-else
-    echo "❌ 啟動失敗，查看日誌："
-    tail -20 "$LOG_FILE"
-    rm -f "$PID_FILE"
+if [ ! -f "$PLIST_MCP" ]; then
+    echo "❌ 找不到 mcp launchd plist，請先執行 ./install.sh"
     exit 1
 fi
+
+if ! launchctl print "$MCP_TARGET" >/dev/null 2>&1; then
+    launchctl bootstrap "$DOMAIN" "$PLIST_MCP"
+    echo "✅ MCP Server 啟動"
+else
+    echo "ℹ️  MCP Server 已在執行"
+fi
+
+if [ -f "$PLIST_WATCHDOG" ]; then
+    if ! launchctl print "$WATCHDOG_TARGET" >/dev/null 2>&1; then
+        launchctl bootstrap "$DOMAIN" "$PLIST_WATCHDOG"
+        echo "✅ Hermes watchdog 啟動"
+    else
+        echo "ℹ️  Hermes watchdog 已在執行"
+    fi
+fi
+
+echo "   MCP 位址：http://127.0.0.1:11435/mcp"
+echo "   日誌：tail -f /tmp/apple-intel-mcp.log"

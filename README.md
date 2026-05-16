@@ -196,18 +196,41 @@ LLM never tries to route Chinese requests to them.
 
 ## Start / stop (HTTP mode)
 
+`install.sh` registers the server as a launchd agent (`com.apple-intel-mcp.server`) that starts at login and auto-restarts on crash. You normally don't need to touch it. To control it manually:
+
 ```bash
-bash start.sh    # start HTTP server in background
-bash stop.sh     # stop it
+bash start.sh    # bootstrap the launchd agent
+bash stop.sh     # bootout the launchd agent
 tail -f /tmp/apple-intel-mcp.log   # view logs
 ```
+
+---
+
+## Hermes integration (optional)
+
+If you use hermes and want `hermes gateway start/stop/restart` to automatically control the MCP server too:
+
+```bash
+bash install-hermes-integration.sh    # add watchdog
+bash uninstall-hermes-integration.sh  # remove watchdog (keeps mcp running)
+```
+
+This installs a second launchd agent (`com.apple-intel-mcp.hermes-watchdog`) that polls every 3 seconds and mirrors the state of `ai.hermes.gateway` onto the MCP server:
+
+| Hermes action | MCP reaction (≤ 3 s lag) |
+|---|---|
+| `hermes gateway stop` | `bootout` MCP |
+| `hermes gateway start` | `bootstrap` MCP |
+| `hermes gateway restart` | `kickstart -k` MCP (PID-change detection) |
+
+The integration is purely additive — MCP runs fine on its own without it. `install.sh` will print a hint if it detects hermes installed.
 
 ---
 
 ## Uninstall
 
 ```bash
-bash uninstall.sh
+bash uninstall.sh   # removes mcp + watchdog (if installed)
 ```
 
 ---
@@ -216,9 +239,11 @@ bash uninstall.sh
 
 ```
 apple-intelligence-mcp/
-├── install.sh
-├── uninstall.sh
+├── install.sh / uninstall.sh
+├── install-hermes-integration.sh / uninstall-hermes-integration.sh
 ├── start.sh / stop.sh
+├── bin/
+│   └── hermes-watchdog.sh    # polls ai.hermes.gateway, syncs mcp state
 ├── mcp-server/
 │   ├── server.py          # Python FastMCP server
 │   └── requirements.txt

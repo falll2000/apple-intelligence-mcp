@@ -1,19 +1,22 @@
 #!/bin/bash
-# Apple Intelligence MCP Server - 停止服務
+# Apple Intelligence MCP Server - 完全停止（含 watchdog）
+#
+# 平常用 `hermes gateway stop` 即可，watchdog 會自動關 mcp。
+# 這個腳本是「連 watchdog 一起關」的逃生口，例如要在 hermes 仍跑時暫停 mcp。
 
-PID_FILE="/tmp/apple-intel-mcp.pid"
+DOMAIN="gui/$(id -u)"
+MCP_TARGET="${DOMAIN}/com.apple-intel-mcp.server"
+WATCHDOG_TARGET="${DOMAIN}/com.apple-intel-mcp.hermes-watchdog"
 
-if [ ! -f "$PID_FILE" ]; then
-    echo "服務未在執行"
-    exit 0
+# 先停 watchdog，否則它會把 mcp 拉回來
+if launchctl print "$WATCHDOG_TARGET" >/dev/null 2>&1; then
+    launchctl bootout "$WATCHDOG_TARGET"
+    echo "✅ Watchdog 已停止"
 fi
 
-PID=$(cat "$PID_FILE")
-if kill -0 "$PID" 2>/dev/null; then
-    kill "$PID"
-    rm -f "$PID_FILE"
-    echo "✅ 服務已停止（PID: $PID）"
+if launchctl print "$MCP_TARGET" >/dev/null 2>&1; then
+    launchctl bootout "$MCP_TARGET"
+    echo "✅ MCP Server 已停止"
 else
-    echo "服務已不在執行"
-    rm -f "$PID_FILE"
+    echo "MCP Server 原本就沒在跑"
 fi

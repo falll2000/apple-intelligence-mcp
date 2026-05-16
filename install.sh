@@ -117,6 +117,12 @@ EOF
 
 # Python MCP Server plist
 PYTHON_VENV="$REPO_DIR/mcp-server/venv/bin/python3"
+DEVELOPER_DIR_LINE=""
+if [ -n "${DEVELOPER_DIR:-}" ]; then
+    DEVELOPER_DIR_LINE="        <key>DEVELOPER_DIR</key>
+        <string>${DEVELOPER_DIR}</string>"
+fi
+
 cat > "$PLIST_MCP" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -130,6 +136,10 @@ cat > "$PLIST_MCP" << EOF
         <string>${PYTHON_VENV}</string>
         <string>${REPO_DIR}/mcp-server/server.py</string>
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+${DEVELOPER_DIR_LINE}
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -146,8 +156,14 @@ info "launchd 設定檔建立完成"
 
 # ── 5. 載入並啟動服務 ────────────────────────────────────────
 
+LAUNCHD_DOMAIN="gui/$(id -u)"
+MCP_TARGET="${LAUNCHD_DOMAIN}/com.apple-intel-mcp.server"
+
+# 清掉舊的（無論是 legacy load 還是 modern bootstrap）
+launchctl bootout "$MCP_TARGET" 2>/dev/null || true
 launchctl unload "$PLIST_MCP" 2>/dev/null || true
-launchctl load "$PLIST_MCP"
+
+launchctl bootstrap "$LAUNCHD_DOMAIN" "$PLIST_MCP"
 info "MCP Server 已啟動（port 11435）"
 
 # ── 6. 完成 ──────────────────────────────────────────────────
@@ -178,3 +194,12 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "查看日誌：tail -f /tmp/apple-intel-mcp.log"
 echo ""
+
+# 偵測 hermes，提示可裝整合
+if [ -f "$HOME/Library/LaunchAgents/ai.hermes.gateway.plist" ]; then
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  偵測到 hermes gateway"
+    echo "  如要讓 hermes gateway start/stop/restart 連動 mcp："
+    echo "    ./install-hermes-integration.sh"
+    echo ""
+fi
