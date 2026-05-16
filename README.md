@@ -171,7 +171,7 @@ NLEmbedding frameworks are essentially English-only on this stack.
 | `tokenize_text` | ✓ proper word segmentation (牛肉麵 stays as one token) |
 | `lemmatize_text` | ✓ correctly a no-op (Chinese has no inflection) |
 | `generate_text_structured` (`classify`) | ✓ usable for sentiment |
-| `translate_text` | ⚠ casual phrases OK, brand names / precision content drift |
+| `translate_text` | ✓ zh→en/zh→ja reliable, en→zh uses standard localized brand forms (蘋果商店, 特斯拉); idioms translate literally |
 | `generate_text` | ⚠ short prompts OK, knowledge cutoff is ~2023 |
 | `classify_sound` | ⚠ language-agnostic but ranking can be off |
 | `analyze_text` | ✗ sentiment always 0/中性, NER misses Chinese entities |
