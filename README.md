@@ -1,5 +1,7 @@
 # Apple Intelligence MCP Server
 
+**English** | [繁體中文](README.zh-Hant.md)
+
 Wraps Apple's on-device AI frameworks (Vision, Natural Language, Speech, Sound Analysis, Foundation Models) as [MCP](https://modelcontextprotocol.io) tools — so any AI client that speaks MCP (Claude, OpenAI, Gemini, Codex…) can call them as local tools.
 
 Everything runs **100% on-device**. No cloud API calls, no data leaves your Mac.
