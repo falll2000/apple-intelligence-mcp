@@ -379,6 +379,83 @@ async def translate_text(text: str, to: str = "zh-Hant", from_lang: str = "自�
 
 
 # ─────────────────────────────────────────────────────────────
+# Writing Tools — transform user-supplied text (proofread / rewrite / summarize)
+# Powered by Foundation Models with pre-tuned system prompts.
+# Different from `generate_text`: these take EXISTING text and transform it,
+# not generate from scratch. Discord-aware (preserves @mentions, :emoji:, code blocks).
+# ─────────────────────────────────────────────────────────────
+
+@mcp.tool()
+async def proofread_text(text: str) -> str:
+    """
+    Fix typos, grammar, and punctuation in user-supplied text. Preserves tone, style,
+    language, and Discord syntax (@mentions, :emoji:, code blocks, markdown).
+
+    WHEN: user has already-written text and asks to "check / proofread / fix
+    typos / fix grammar / correct" it — including Discord messages, emails, notes.
+    NOT FOR: generating new text from scratch (use `generate_text`), changing
+    tone/style (use `rewrite_text`), or shortening (use `summarize_text`).
+
+    Returns ONLY the corrected text, no labels or explanations.
+
+    Args:
+        text: the text to proofread. Language auto-detected (zh-Hant / zh-Hans /
+            en / mixed). Discord markup preserved verbatim.
+    """
+    return _unwrap(await bridge.call("proofread_text", {"text": text}), key="text")
+
+
+@mcp.tool()
+async def rewrite_text(text: str, tone: str = "concise") -> str:
+    """
+    Rewrite user-supplied text in a different tone while preserving meaning,
+    language, and Discord syntax.
+
+    WHEN: user has already-written text and asks to make it
+    "formal / casual / shorter / friendlier / more professional" — e.g.
+    polishing a Discord reply before sending.
+    NOT FOR: fixing typos only (use `proofread_text` — it preserves wording),
+    generating new text (use `generate_text`), or summarizing
+    long content (use `summarize_text`).
+
+    Returns ONLY the rewritten text, no labels or explanations.
+
+    Args:
+        text: the text to rewrite.
+        tone: one of "formal" | "casual" | "concise" | "friendly" | "professional".
+            Default "concise".
+    """
+    return _unwrap(await bridge.call("rewrite_text", {
+        "text": text, "tone": tone,
+    }), key="text")
+
+
+@mcp.tool()
+async def summarize_text(text: str, length: str = "medium") -> str:
+    """
+    Condense user-supplied text while preserving key info and language.
+    Returns flowing prose (not bullet points — for structured summary use
+    `generate_text_structured(schema="summarize")` instead).
+
+    WHEN: user has long text (chat log, article, meeting notes) and asks to
+    "summarize / shorten / TL;DR / give me the gist".
+    NOT FOR: fixing errors (use `proofread_text`), changing tone (use
+    `rewrite_text`), or when caller needs JSON shape with title + keyPoints
+    (use `generate_text_structured(schema="summarize")`).
+
+    Returns ONLY the summary, no labels.
+
+    Args:
+        text: the text to summarize.
+        length: one of "short" (1–2 sentences) | "medium" (3–5 sentences) |
+            "long" (6–10 sentences). Default "medium".
+    """
+    return _unwrap(await bridge.call("summarize_text", {
+        "text": text, "length": length,
+    }), key="text")
+
+
+# ─────────────────────────────────────────────────────────────
 # Natural Language
 # ─────────────────────────────────────────────────────────────
 

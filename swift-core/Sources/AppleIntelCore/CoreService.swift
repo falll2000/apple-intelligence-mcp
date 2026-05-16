@@ -19,6 +19,7 @@ struct CoreService {
         let visionPoseHandler = VisionPoseHandler()
         let nlAdvancedHandler = NLAdvancedHandler()
         let speechSynthHandler = SpeechSynthHandler()
+        let writingToolsHandler = WritingToolsHandler()
 
         let encoder = JSONEncoder()
         let decoder = JSONDecoder()
@@ -50,7 +51,8 @@ struct CoreService {
                     sound: soundHandler,
                     visionPose: visionPoseHandler,
                     nlAdvanced: nlAdvancedHandler,
-                    speechSynth: speechSynthHandler
+                    speechSynth: speechSynthHandler,
+                    writingTools: writingToolsHandler
                 )
             } catch {
                 let fallback = IPCResponse.fail(id: requestId, error: error.localizedDescription)
@@ -84,7 +86,8 @@ struct CoreService {
         sound: SoundHandler,
         visionPose: VisionPoseHandler,
         nlAdvanced: NLAdvancedHandler,
-        speechSynth: SpeechSynthHandler
+        speechSynth: SpeechSynthHandler,
+        writingTools: WritingToolsHandler
     ) async throws -> IPCResponse {
 
         switch request.tool {
@@ -534,6 +537,32 @@ struct CoreService {
                 "count": .int(voices.count),
                 "voices": .string(lines.joined(separator: "\n"))
             ])
+
+        // ── proofread_text：校對（抓錯字/語法/標點，不改寫風格）──
+        case "proofread_text":
+            guard let text = request.params["text"]?.stringValue else {
+                return .fail(id: request.id, error: "缺少必要參數 text")
+            }
+            let result = try await writingTools.proofread(text: text)
+            return .ok(id: request.id, result: ["text": .string(result)])
+
+        // ── rewrite_text：改寫語氣（formal/casual/concise/friendly/professional）──
+        case "rewrite_text":
+            guard let text = request.params["text"]?.stringValue else {
+                return .fail(id: request.id, error: "缺少必要參數 text")
+            }
+            let tone = request.params["tone"]?.stringValue ?? "concise"
+            let result = try await writingTools.rewrite(text: text, tone: tone)
+            return .ok(id: request.id, result: ["text": .string(result)])
+
+        // ── summarize_text：濃縮（length=short/medium/long）──
+        case "summarize_text":
+            guard let text = request.params["text"]?.stringValue else {
+                return .fail(id: request.id, error: "缺少必要參數 text")
+            }
+            let length = request.params["length"]?.stringValue ?? "medium"
+            let result = try await writingTools.summarize(text: text, length: length)
+            return .ok(id: request.id, result: ["text": .string(result)])
 
         // ── tag_parts_of_speech：詞性標注 ──
         case "tag_parts_of_speech":
