@@ -314,15 +314,41 @@ async def generate_text_structured(
     drift. Prefer this over `generate_text` whenever a schema fits.
     NOT FOR: free-form prose, code generation, or schemas not in the list below.
 
-    Schemas:
+    Schemas and prompt requirements:
+
       - "list"      → {items: string[]}
+            Prompt MUST state what to list and (optionally) how many.
+            Good: "List 5 common Python built-in data structures"
+            Bad : "Python data structures"  (model guesses count/scope)
+
       - "classify"  → {label, confidence, reasoning}
+            Prompt MUST state the classification axis. Without it the
+            model picks an axis arbitrarily (e.g. "Product Review"
+            instead of sentiment).
+            Good: "Classify sentiment (positive/negative/neutral): ..."
+            Good: "Classify topic (tech/sports/politics/other): ..."
+            Bad : "<just paste the text>"
+
       - "summarize" → {title, summary, keyPoints[]}
+            Prompt is the text to summarize. Keep keyPoints expectations
+            in mind — model may invent a 3rd/4th bullet if the source
+            only contains 2 facts.
+
       - "extract"   → {pairs: ["key: value", ...]}
+            Prompt MUST list the field names to extract, otherwise the
+            model returns the entire source text as one pair.
+            Good: "Extract person names, cities, hotels, companies as
+                   'type: name'. Source: ..."
+            Bad : "<just paste the text>"
+
       - "qa"        → {answer, evidence}
+            Prompt is the question. Specify units / format in the
+            question itself (the on-device model has ~2023 knowledge
+            and can be off by 1000× on physical constants).
+            Good: "Boiling point of water in Celsius at sea level?"
 
     Args:
-        prompt: input instruction or text.
+        prompt: input instruction or text (see per-schema requirements above).
         schema: one of list/classify/summarize/extract/qa.
         system_prompt: optional persona / instructions.
     """
