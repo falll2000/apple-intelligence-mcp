@@ -1,6 +1,6 @@
 # Apple Intelligence MCP Server
 
-**English** | [繁體中文](README.zh-Hant.md)
+**English** | [繁體中文](README.zh-Hant.md) | [简体中文](README.zh-Hans.md)
 
 A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes
 Apple's on-device AI stack — **Foundation Models, Vision, Natural Language,

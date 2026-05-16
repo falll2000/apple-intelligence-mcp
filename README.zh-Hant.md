@@ -1,6 +1,6 @@
 # Apple Intelligence MCP Server
 
-[English](README.md) | **繁體中文**
+[English](README.md) | **繁體中文** | [简体中文](README.zh-Hans.md)
 
 把 macOS 內建的 Apple Intelligence 框架（Foundation Models、Vision、Natural
 Language、Speech、Sound Analysis）包成 21 個 [MCP](https://modelcontextprotocol.io)
