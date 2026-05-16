@@ -81,7 +81,7 @@ swift-core/AppleIntelCore   ← persistent process, frameworks loaded once
 
 ---
 
-## Tools (16 total)
+## Tools (18 total)
 
 The 19 single-image Vision capabilities are routed through one tool (`vision_analyze`) with a `mode` parameter, instead of 19 individual tools — this measurably improves host-LLM tool-selection accuracy.
 
@@ -119,6 +119,8 @@ The 19 single-image Vision capabilities are routed through one tool (`vision_ana
 | Tool | Description |
 |------|-------------|
 | `transcribe_audio` | Offline speech-to-text (zh-TW / zh-CN / en-US / ja-JP / ...) |
+| `synthesize_speech` | Offline text-to-speech via AVSpeechSynthesizer → `.wav` (zh-TW Meijia by default) |
+| `list_voices` | Discover available TTS voice identifiers, filterable by BCP-47 prefix |
 | `classify_sound` | Classify ambient sound (music, laughter, dog bark, ...) |
 
 ---
@@ -136,9 +138,13 @@ the work yourself:
     with the appropriate mode. Do NOT describe the image yourself first.
   - User provides an absolute path to an audio file and wants the words →
     call `transcribe_audio`.
-  - User asks for sentiment / NER / tokenization / POS / lemmatization /
-    word or sentence similarity → call the matching tool.
+  - User asks for tokenization or lemmatization → call the matching tool.
+  - User asks for sentiment classification → call
+    `generate_text_structured(schema="classify")` (works for Chinese too,
+    unlike `analyze_text` which is English-only).
   - User asks to compare two images → `image_similarity`.
+  - User asks to read text aloud → call `synthesize_speech` and attach
+    the returned `.wav` path to the response.
 
 You MAY use it (caller's discretion) for:
   - Bulk text rewriting / translation where token cost matters more than nuance
@@ -153,7 +159,30 @@ You should NOT use it for:
 
 ## Usage notes
 
-**Apple Foundation Models safety filter** — `generate_text` and related tools may return an error for certain content. This is enforced by the on-device model, not by this server.
+**Language coverage is uneven across Apple frameworks.** Vision, Speech, and
+FoundationModels handle Chinese well; the older NaturalLanguage and
+NLEmbedding frameworks are essentially English-only on this stack.
+
+| Tool | zh-Hant / zh-Hans |
+|---|---|
+| `vision_analyze` (all modes) | ✓ strong |
+| `transcribe_audio` | ✓ accurate (Apple model adds commas only, no periods) |
+| `synthesize_speech` | ✓ Meijia / Eloquence voices |
+| `tokenize_text` | ✓ proper word segmentation (牛肉麵 stays as one token) |
+| `lemmatize_text` | ✓ correctly a no-op (Chinese has no inflection) |
+| `generate_text_structured` (`classify`) | ✓ usable for sentiment |
+| `translate_text` | ⚠ casual phrases OK, brand names / precision content drift |
+| `generate_text` | ⚠ short prompts OK, knowledge cutoff is ~2023 |
+| `classify_sound` | ⚠ language-agnostic but ranking can be off |
+| `analyze_text` | ✗ sentiment always 0/中性, NER misses Chinese entities |
+| `tag_parts_of_speech` | ✗ all tags return as 「其他」 |
+| `word_similarity` / `sentence_similarity` | ✗ no embedding model loaded |
+
+For Chinese-heavy deployments, exclude the four ✗ tools at the host's MCP
+config layer (e.g. hermes' `mcp_servers.<name>.tools.exclude`) so the host
+LLM never tries to route Chinese requests to them.
+
+**Apple Foundation Models safety filter** — `generate_text` and related tools may return an error for certain content. This is enforced by the on-device model, not by this server. Includes seemingly innocuous body-related characters (e.g. 「胖」 in a brand name) — prefer `generate_text_structured` for content that risks tripping the filter.
 
 **`detect_objects`** requires a user-supplied Core ML model (`.mlmodel` or `.mlmodelc`). All other tools work out of the box.
 
