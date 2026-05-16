@@ -2,9 +2,49 @@
 
 **English** | [繁體中文](README.zh-Hant.md)
 
-Wraps Apple's on-device AI frameworks (Vision, Natural Language, Speech, Sound Analysis, Foundation Models) as [MCP](https://modelcontextprotocol.io) tools — so any AI client that speaks MCP (Claude, OpenAI, Gemini, Codex…) can call them as local tools.
+A [Model Context Protocol](https://modelcontextprotocol.io) server that exposes
+Apple's on-device AI stack — **Foundation Models, Vision, Natural Language,
+Speech, and Sound Analysis** — as 21 tools any MCP-speaking client can call
+(Claude Desktop, OpenAI, Gemini, Codex, Hermes, …).
 
-Everything runs **100% on-device**. No cloud API calls, no data leaves your Mac.
+Everything runs **100% on-device**. No API keys, no cloud round-trips, no data
+leaves your Mac.
+
+---
+
+## Why this exists
+
+Cloud LLM tokens are expensive for high-volume deterministic work (translation,
+summarization, OCR, transcription). Apple Silicon Macs ship a capable on-device
+AI stack — Foundation Models, Vision, Speech — but only if you write Swift.
+This server wraps that stack as a single MCP endpoint so any host LLM (Claude,
+GPT, Gemini) can offload bulk work to your Mac instead of burning tokens.
+
+Concretely it lets a host model say *"OCR this image"*, *"transcribe this
+audio"*, *"polish this Discord reply"*, *"summarize this meeting log"* — and
+the work happens locally in milliseconds, free.
+
+## What you can build with it
+
+- **Discord / chat copilot**
+  `proofread_text`, `rewrite_text(tone="professional")`, `summarize_text`
+  preserve `@mentions`, `:emoji:`, code fences, and the input language.
+- **Document workflow**
+  `vision_analyze(mode="ocr")` → `generate_text_structured(schema="extract")` →
+  `generate_text_structured(schema="summarize")` to turn a scanned PDF or
+  photo into structured fields plus a summary.
+- **Voice-message pipeline**
+  `transcribe_audio` → `summarize_text` → `synthesize_speech` builds a full
+  "spoken-in / spoken-out" loop without leaving the device.
+- **Image cataloging**
+  `vision_analyze(mode="classify"/"aesthetics"/"document")` plus
+  `image_similarity` for local-photo organization.
+- **Privacy-sensitive transcription / translation**
+  Legal, medical, HR contexts where audio or text must not leave the machine.
+- **Token-cost optimization for AI clients**
+  Push translation / bulk rewrite / sentiment classification to the local model
+  via the recommended host system prompt below, reserve cloud tokens for
+  reasoning-heavy work.
 
 ---
 
@@ -13,30 +53,26 @@ Everything runs **100% on-device**. No cloud API calls, no data leaves your Mac.
 - Apple Silicon Mac (M1 or later)
 - macOS 26 (Tahoe) or later
 - Apple Intelligence enabled (System Settings → Apple Intelligence & Siri)
-- Xcode Command Line Tools (`xcode-select --install`)
+- Full Xcode (Command Line Tools alone don't ship the FoundationModels macros)
 - Homebrew + Python 3.10+ (`brew install python3`)
-
----
 
 ## Install
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/apple-intelligence-mcp.git
+git clone https://github.com/falll2000/apple-intelligence-mcp.git
 cd apple-intelligence-mcp
 bash install.sh
 ```
 
 The script will:
-1. Compile the Swift Core Service (release build)
-2. Create a Python venv and install dependencies
-3. Start an HTTP MCP server on port 11435 via launchd
-4. Print the exact config snippet to paste into your AI client
+1. Compile the Swift Core Service (release build, `swift build -c release`)
+2. Create a Python venv and install `mcp` (FastMCP)
+3. Register the server as a launchd agent (`com.apple-intel-mcp.server`) on port 11435
+4. Print the exact config snippet for your AI client
 
----
+## Connect a client
 
-## Connect to Claude Desktop
-
-Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+**Claude Desktop (stdio)** — edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
@@ -49,73 +85,142 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-> `install.sh` prints the exact paths for your machine at the end — just copy-paste.
+`install.sh` prints the absolute paths for your machine. Copy-paste them.
 
-## Connect to other AI clients (OpenAI, Gemini, etc.)
+**Other clients (HTTP)** — the HTTP server starts at login via launchd:
 
 ```
 http://127.0.0.1:11435/mcp
 ```
-
-The HTTP server starts automatically at login via launchd.
 
 ---
 
 ## Architecture
 
 ```
-AI Client (Claude / OpenAI / etc.)
-        │  MCP protocol
-        ▼
-Python FastMCP server  ←── stdio (Claude Desktop)
-mcp-server/server.py   ←── streamable-http :11435 (other clients)
-        │  JSON lines over stdin/stdout
-        ▼
-Swift Core Service
-swift-core/AppleIntelCore   ← persistent process, frameworks loaded once
-        │
-        ├── FoundationModels   (on-device LLM)
-        ├── Vision             (image analysis)
-        ├── NaturalLanguage    (text analysis)
-        ├── Speech             (audio → text)
-        └── SoundAnalysis      (audio classification)
+┌────────────────────────────────────────────┐
+│        AI Client (Claude / GPT / etc.)     │
+└──────────────────┬─────────────────────────┘
+                   │  MCP protocol
+                   │  (stdio  OR  streamable-http :11435)
+                   ▼
+┌────────────────────────────────────────────┐
+│   Python FastMCP server                    │
+│   mcp-server/server.py                     │
+│   - 21 @mcp.tool definitions               │
+│   - SwiftBridge: persistent subprocess +   │
+│     async lock + JSON line protocol        │
+└──────────────────┬─────────────────────────┘
+                   │  stdin/stdout JSON lines
+                   │  (IPCRequest / IPCResponse)
+                   ▼
+┌────────────────────────────────────────────┐
+│   Swift Core Service (long-lived process)  │
+│   swift-core/AppleIntelCore                │
+│   - CoreService.swift   (request router)   │
+│   - per-domain handlers (see modules)      │
+│   - Apple frameworks loaded once on launch │
+└──────────────────┬─────────────────────────┘
+                   │
+                   ▼
+       FoundationModels  ←─ on-device LLM (~3B)
+       Vision            ←─ 18 image / pose tasks
+       NaturalLanguage   ←─ tokenize / NER / POS …
+       Speech            ←─ offline STT
+       AVFoundation      ←─ offline TTS
+       SoundAnalysis     ←─ audio classification
 ```
+
+**Why two processes?** FastMCP is Python-native; Apple AI frameworks are
+Swift-only. The Swift binary stays resident so frameworks (which take seconds
+to initialize) load once. The Python layer is thin — it handles MCP protocol,
+schema/description, and serialization. Each `await bridge.call(...)` writes one
+JSON line to stdin, reads one JSON line from stdout, under an `asyncio.Lock`
+to keep the request/response stream serialized.
+
+## Module structure
+
+`swift-core/Sources/AppleIntelCore/` is split one handler per Apple-framework
+concern. Adding a new tool follows a predictable pattern:
+
+```
+main.swift                 ← entry point (await CoreService.run())
+Models.swift               ← IPCRequest / IPCResponse / JSONValue
+HandlerError.swift         ← typed errors (invalidInput / unavailable / …)
+CoreService.swift          ← request router — adds a `case "<tool>":` per tool
+                             and forwards to the right handler
+GenerateHandler.swift      ← FoundationModels:
+                             - generate_text (free-form)
+                             - generate_text_structured (@Generable schemas)
+TranslateHandler.swift     ← FM-prompt translation w/ per-target-language
+                             instructions (avoids the "model thinks input is
+                             already English" trap on zh→en)
+WritingToolsHandler.swift  ← FM-prompt proofread / rewrite / summarize:
+                             - NLLanguageRecognizer + CJK ratio routing
+                             - per-language instructions (zh-Hant/zh-Hans/en/ja)
+                             - Discord-aware (preserves @/:emoji:/```fences)
+OCRHandler.swift           ← Vision text recognition (zh/en/ja/ko)
+VisionExtHandler.swift     ← Vision: faces, barcodes, contours, text regions,
+                             face landmarks, human bodies, horizon,
+                             segment_foreground, aesthetics, optical_flow,
+                             custom Core ML object detection, image similarity
+VisionPoseHandler.swift    ← Vision: 2D body pose, hand pose, animals,
+                             rectangles, saliency, document, person segment,
+                             3D body pose (guarded — see Known limits)
+AnalyzeHandler.swift       ← NL: sentiment, language detection, NER, keywords
+NLAdvancedHandler.swift    ← NL: tokenize, lemmatize, POS tagging
+NLEmbeddingHandler.swift   ← NL: word / sentence semantic similarity
+TranscribeHandler.swift    ← Speech: offline STT (SFSpeechRecognizer)
+SpeechSynthHandler.swift   ← AVFoundation TTS → .wav file + voice list
+SoundHandler.swift         ← SoundAnalysis: ambient sound classification
+```
+
+**Adding a tool — checklist:**
+
+1. Pick the matching handler (or create a new one if the framework is new).
+2. Implement the Swift function — return a value, throw `HandlerError` on bad input.
+3. In `CoreService.swift`, add a `case "<tool_name>":` that decodes params and calls the handler.
+4. In `mcp-server/server.py`, add an `@mcp.tool()` function with WHEN/NOT-FOR docstring and an `await bridge.call("<tool_name>", {...})`.
+5. Rebuild Swift (`swift build -c release`), restart MCP (`launchctl kickstart -k gui/$UID/com.apple-intel-mcp.server`).
+6. Document in this README + `README.zh-Hant.md`.
 
 ---
 
 ## Tools (21 total)
 
-The 18 single-image Vision capabilities are routed through one tool (`vision_analyze`) with a `mode` parameter, instead of 18 individual tools — this measurably improves host-LLM tool-selection accuracy.
+The 18 single-image Vision capabilities are routed through one tool
+(`vision_analyze`) with a `mode` parameter, instead of 18 individual tools —
+this measurably improves host-LLM tool-selection accuracy.
 
 ### Foundation Models — on-device LLM
 
 | Tool | Description |
 |------|-------------|
-| `generate_text` | General text generation / rewriting on the local LLM |
-| `generate_text_structured` | Guided generation — guaranteed JSON. Schemas: `list` / `classify` / `summarize` / `extract` / `qa` |
-| `translate_text` | Translation between zh-Hant / zh-Hans / en / ja / ko / fr / de / es |
+| `generate_text` | General text generation / rewriting |
+| `generate_text_structured` | Guided generation — guaranteed JSON. Schemas: `list` / `classify` / `summarize` / `extract` / `qa` (each has its own prompt-quality guidance in the tool description) |
+| `translate_text` | Translation between zh-Hant / zh-Hans / en / ja / ko / fr / de / es. Uses per-target-language instructions |
 | `proofread_text` | Fix typos / grammar / punctuation in user-supplied text. Preserves tone, language, and Discord syntax (@mentions, :emoji:, code blocks) |
-| `rewrite_text` | Rewrite text in a different tone (`formal` / `casual` / `concise` / `friendly` / `professional`) while preserving meaning, language, and Discord syntax |
-| `summarize_text` | Condense text to short / medium / long prose. Same-language in/out (zh→zh, en→en) |
+| `rewrite_text` | Rewrite in a different tone (`formal` / `casual` / `concise` / `friendly` / `professional`) while preserving meaning, language, and Discord syntax |
+| `summarize_text` | Condense text to `short` / `medium` / `long` prose. Same-language in/out (zh→zh, en→en) |
 
 ### Vision — image / pose
 
 | Tool | Description |
 |------|-------------|
-| `vision_analyze` | One router for 18 single-image tasks. `mode` ∈ {`ocr`, `classify`, `faces`, `face_landmarks`, `barcodes`, `text_regions`, `contours`, `human_bodies`, `rectangles`, `horizon`, `saliency`, `document`, `segment_person`, `segment_foreground`, `aesthetics`, `body_pose`, `hand_pose`, `animals`} |
-| `image_similarity` | Visual similarity score between two image files |
+| `vision_analyze` | 18-task router. `mode` ∈ {`ocr`, `classify`, `faces`, `face_landmarks`, `barcodes`, `text_regions`, `contours`, `human_bodies`, `rectangles`, `horizon`, `saliency`, `document`, `segment_person`, `segment_foreground`, `aesthetics`, `body_pose`, `hand_pose`, `animals`} |
+| `image_similarity` | Visual similarity score between two image files (Vision feature print L2 distance, thresholds tuned 0.1 / 0.4 / 0.8) |
 | `detect_optical_flow` | Per-pixel motion vectors between two frames |
-| `detect_trajectories` | Parabolic trajectory detection from a video file |
-| `detect_objects` | Object detection with a user-supplied Core ML model |
+| `detect_trajectories` | Parabolic trajectory detection on a local video file |
+| `detect_objects` | Object detection with a user-supplied Core ML model (`.mlmodel` / `.mlmodelc`) |
 
 ### Natural Language
 
 | Tool | Description |
 |------|-------------|
 | `analyze_text` | Sentiment + language detection + NER + keywords |
-| `tokenize_text` | Split into words / sentences / paragraphs |
+| `tokenize_text` | Split into words / sentences / paragraphs (multilingual; correctly segments Chinese) |
 | `tag_parts_of_speech` | POS tagging |
-| `lemmatize_text` | Reduce words to base form |
+| `lemmatize_text` | Reduce words to base form (running → run) |
 | `word_similarity` | Semantic similarity between two words (0–1) |
 | `sentence_similarity` | Semantic similarity between two sentences (0–1) |
 
@@ -123,16 +228,19 @@ The 18 single-image Vision capabilities are routed through one tool (`vision_ana
 
 | Tool | Description |
 |------|-------------|
-| `transcribe_audio` | Offline speech-to-text (zh-TW / zh-CN / en-US / ja-JP / ...) |
-| `synthesize_speech` | Offline text-to-speech via AVSpeechSynthesizer → `.wav` (zh-TW Meijia by default) |
-| `list_voices` | Discover available TTS voice identifiers, filterable by BCP-47 prefix |
-| `classify_sound` | Classify ambient sound (music, laughter, dog bark, ...) |
+| `transcribe_audio` | Offline STT (zh-TW / zh-CN / en-US / ja-JP / …). Punctuation + dictation hints enabled |
+| `synthesize_speech` | Offline TTS via AVSpeechSynthesizer → `.wav` (zh-TW Meijia by default) |
+| `list_voices` | Discover voice identifiers, filterable by BCP-47 prefix |
+| `classify_sound` | Classify ambient audio (music, laughter, dog bark, …). Needs ≥ 3 s input |
 
 ---
 
 ## Recommended host system prompt
 
-The host model decides whether to call these tools based on its system prompt and the tool descriptions. Tool descriptions in this server are written in `WHEN: / NOT FOR:` format to help, but the host needs a clear policy too. Paste this into your client's system prompt to make routing reliable:
+The host model decides whether to call these tools based on its system prompt
+plus the tool descriptions. The server uses `WHEN: / NOT FOR:` descriptions to
+help, but the host needs an explicit policy too. Paste the following into your
+client's system prompt for reliable routing:
 
 ```
 You have access to an `apple-intelligence` MCP server that runs entirely on the
@@ -170,9 +278,9 @@ You should NOT use it for:
 
 ---
 
-## Usage notes
+## Language coverage
 
-**Language coverage is uneven across Apple frameworks.** Vision, Speech, and
+Apple's frameworks are uneven across languages. Vision, Speech, and
 FoundationModels handle Chinese well; the older NaturalLanguage and
 NLEmbedding frameworks are essentially English-only on this stack.
 
@@ -180,68 +288,101 @@ NLEmbedding frameworks are essentially English-only on this stack.
 |---|---|
 | `vision_analyze` (all modes) | ✓ strong |
 | `transcribe_audio` | ✓ accurate (Apple model adds commas only, no periods) |
-| `synthesize_speech` | ✓ Meijia / Eloquence voices |
+| `synthesize_speech` | ✓ Meijia / Eloquence voices available |
 | `tokenize_text` | ✓ proper word segmentation (牛肉麵 stays as one token) |
 | `lemmatize_text` | ✓ correctly a no-op (Chinese has no inflection) |
-| `generate_text_structured` (`classify`) | ✓ usable for sentiment |
-| `translate_text` | ✓ zh→en/zh→ja reliable, en→zh uses standard localized brand forms (蘋果商店, 特斯拉); idioms translate literally |
+| `generate_text_structured` (`classify`) | ✓ usable for Chinese sentiment |
+| `translate_text` | ✓ zh→en / zh→ja reliable; en→zh uses standard localized brand forms (蘋果商店, 特斯拉); idioms translate literally |
 | `proofread_text` | ⚠ language preserved correctly; FM misses some zh grammar errors (一各/再/的-vs-得) and some en subject-verb agreement |
-| `rewrite_text` | ✓ language preserved; `professional` / `concise` / `formal` stable; `casual` / `friendly` occasionally paraphrases beyond original meaning |
+| `rewrite_text` | ✓ language preserved; `professional` / `concise` / `formal` stable; `casual` / `friendly` occasionally paraphrases beyond meaning |
 | `summarize_text` | ✓ language preserved (zh→zh, en→en); `short` length sometimes loose |
-| `generate_text` | ⚠ short prompts OK, knowledge cutoff is ~2023 |
+| `generate_text` | ⚠ short prompts OK; knowledge cutoff ~2023 |
 | `classify_sound` | ⚠ language-agnostic but ranking can be off |
-| `analyze_text` | ✗ sentiment always 0/中性, NER misses Chinese entities |
-| `tag_parts_of_speech` | ✗ all tags return as 「其他」 |
-| `word_similarity` / `sentence_similarity` | ✗ no embedding model loaded |
+| `analyze_text` | ✗ Chinese sentiment always 0/中性, NER misses Chinese entities |
+| `tag_parts_of_speech` | ✗ Chinese tags all return as 「其他」 |
+| `word_similarity` / `sentence_similarity` | ✗ no Chinese embedding model |
 
 For Chinese-heavy deployments, exclude the four ✗ tools at the host's MCP
 config layer (e.g. hermes' `mcp_servers.<name>.tools.exclude`) so the host
 LLM never tries to route Chinese requests to them.
 
-**Apple Foundation Models safety filter** — `generate_text` and related tools may return an error for certain content. This is enforced by the on-device model, not by this server. Includes seemingly innocuous body-related characters (e.g. 「胖」 in a brand name) — prefer `generate_text_structured` for content that risks tripping the filter.
+## Known limits
 
-**`detect_objects`** requires a user-supplied Core ML model (`.mlmodel` or `.mlmodelc`). All other tools work out of the box.
+**Foundation Models safety filter** — `generate_text` and related tools may
+error on certain content. The filter is enforced inside the on-device model,
+not by this server. Even innocuous body-related characters (e.g. 「胖」 in a
+brand name) can trip it. Use `generate_text_structured` for content that
+might trigger it.
 
-**`detect_trajectories`** requires a video file (mp4/mov) and works best with footage of objects following a parabolic path (sports, balls, etc.).
+**`detect_objects`** requires a user-supplied Core ML model (`.mlmodel` or
+`.mlmodelc`). All other tools work out of the box.
 
-**`body_pose_3d` is removed from the public mode list.** `VNDetectHumanBodyPose3DRequest` terminates the Swift Core process with an uncaught Objective-C exception during `perform`, before Swift can handle the error. The Swift case still exists as a safety net (returns `unavailable` if a stale client tries the mode) but it's no longer advertised. Use `mode="body_pose"` for stable 2D pose detection.
+**`detect_trajectories`** requires a video file (mp4/mov). Works best with
+footage of objects following a parabolic path (sports, balls).
 
-**Vision runtime tests** should be run from an Xcode-built binary, Terminal, or another unsandboxed local process. Sandboxed runners may produce false `CVPixelBuffer`, `ANECF`, or `request cancelled` errors.
+**`body_pose_3d` is removed from the public mode list.**
+`VNDetectHumanBodyPose3DRequest` terminates the Swift Core process with an
+uncaught Objective-C exception during `perform`, before Swift can catch it.
+The Swift case still exists as a safety net (returns `unavailable` if a stale
+client tries) but it's no longer advertised. Use `mode="body_pose"` for stable
+2D pose detection.
+
+**Apple Intelligence ceilings** — the following macOS 26 APIs *look* callable
+in the SDK but are not actually usable from a daemon:
+
+| API | Why blocked |
+|---|---|
+| Writing Tools (`NSWritingToolsCoordinator`) | UI-bound (requires `NSView`) — we provide `proofread_text` / `rewrite_text` / `summarize_text` via Foundation Models instead |
+| Image Playground (`ImageCreator`) | Returns `backgroundCreationForbidden` even from Terminal — Apple-only entitlement |
+| Genmoji | Same path as `ImageCreator(style="emoji")`, same entitlement block |
+| Visual Intelligence | Only `AppIntents.AssistantSchemas.VisualIntelligenceIntent` — schema-only, no callable API |
+| Smart Reply | `CSSmartReply` is an internal symbol (only in `.tbd`, no public header) |
+
+**Vision runtime tests** should run from an Xcode-built binary, Terminal, or
+another unsandboxed local process. Sandboxed runners produce false
+`CVPixelBuffer`, `ANECF`, or `request cancelled` errors.
 
 ---
 
-## Start / stop (HTTP mode)
+## Manage the service (HTTP mode)
 
-`install.sh` registers the server as a launchd agent (`com.apple-intel-mcp.server`) that starts at login and auto-restarts on crash. You normally don't need to touch it. To control it manually:
+`install.sh` registers a launchd agent that starts at login and auto-restarts
+on crash. Manual control:
 
 ```bash
-bash start.sh    # bootstrap the launchd agent
-bash stop.sh     # bootout the launchd agent
-tail -f /tmp/apple-intel-mcp.log   # view logs
+bash start.sh                                           # bootstrap launchd agent
+bash stop.sh                                            # bootout launchd agent
+tail -f /tmp/apple-intel-mcp.log                        # logs
+launchctl kickstart -k gui/$UID/com.apple-intel-mcp.server   # force restart
 ```
-
----
 
 ## Hermes integration (optional)
 
-If you use hermes and want `hermes gateway start/stop/restart` to automatically control the MCP server too:
+If you use [hermes](https://github.com/) and want `hermes gateway
+start/stop/restart` to drive the MCP server too:
 
 ```bash
-bash install-hermes-integration.sh    # add watchdog
+bash install-hermes-integration.sh    # install watchdog
 bash uninstall-hermes-integration.sh  # remove watchdog (keeps mcp running)
 ```
 
-This installs a second launchd agent (`com.apple-intel-mcp.hermes-watchdog`) that polls every 3 seconds and mirrors the state of `ai.hermes.gateway` onto the MCP server:
+This installs a second launchd agent (`com.apple-intel-mcp.hermes-watchdog`)
+that polls every 3 s and mirrors `ai.hermes.gateway` onto the MCP server:
 
 | Hermes action | MCP reaction (≤ 3 s lag) |
 |---|---|
 | `hermes gateway stop` | `bootout` MCP |
 | `hermes gateway start` | `bootstrap` MCP |
-| `hermes gateway restart` | `kickstart -k` MCP (PID-change detection) |
+| `hermes gateway restart` | `kickstart -k` MCP (PID change detection) |
 
-The integration is purely additive — MCP runs fine on its own without it. `install.sh` will print a hint if it detects hermes installed.
+The integration is purely additive — MCP runs fine on its own. `install.sh`
+prints a hint if it detects hermes installed.
 
----
+> Implementation note: the watchdog script is copied into
+> `~/Library/Application Support/apple-intel-mcp/` at install time, because
+> launchd refuses to execute shell scripts directly from `/Volumes/` on
+> macOS 26 (TCC blocks it as "Operation not permitted"). The Python venv
+> binary doesn't hit this restriction.
 
 ## Uninstall
 
@@ -259,32 +400,31 @@ apple-intelligence-mcp/
 ├── install-hermes-integration.sh / uninstall-hermes-integration.sh
 ├── start.sh / stop.sh
 ├── bin/
-│   └── hermes-watchdog.sh    # polls ai.hermes.gateway, syncs mcp state
+│   └── hermes-watchdog.sh         # polls ai.hermes.gateway, syncs mcp state
 ├── mcp-server/
-│   ├── server.py          # Python FastMCP server
-│   └── requirements.txt
+│   ├── server.py                  # FastMCP server + SwiftBridge (~650 LOC)
+│   └── requirements.txt           # mcp>=1.0.0
 ├── swift-core/
-│   ├── Package.swift
-│   └── Sources/AppleIntelCore/
-│       ├── main.swift
+│   ├── Package.swift              # macOS 26, Swift 6
+│   └── Sources/AppleIntelCore/    # ~2,500 LOC, one handler per framework
+│       ├── main.swift             # entry point
 │       ├── CoreService.swift      # request router
-│       ├── GenerateHandler.swift  # Foundation Models
-│       ├── OCRHandler.swift
-│       ├── AnalyzeHandler.swift   # NL sentiment/NER/keywords
-│       ├── NLAdvancedHandler.swift # tokenize/POS/lemma
-│       ├── NLEmbeddingHandler.swift # word/sentence similarity
-│       ├── TranslateHandler.swift
-│       ├── WritingToolsHandler.swift # proofread/rewrite/summarize
-│       ├── TranscribeHandler.swift
-│       ├── SoundHandler.swift
-│       ├── VisionExtHandler.swift  # Vision image tools
-│       ├── VisionPoseHandler.swift # Vision pose/motion tools
 │       ├── Models.swift           # IPC types
-│       └── HandlerError.swift
-└── test-assets/           # sample images for testing
+│       ├── HandlerError.swift     # typed errors
+│       ├── GenerateHandler.swift          # Foundation Models
+│       ├── TranslateHandler.swift         # FM translation
+│       ├── WritingToolsHandler.swift      # proofread/rewrite/summarize
+│       ├── OCRHandler.swift               # Vision OCR
+│       ├── VisionExtHandler.swift         # Vision detect tools
+│       ├── VisionPoseHandler.swift        # Vision pose / motion
+│       ├── AnalyzeHandler.swift           # NL sentiment/NER/keywords
+│       ├── NLAdvancedHandler.swift        # NL tokenize/POS/lemma
+│       ├── NLEmbeddingHandler.swift       # NL similarity
+│       ├── TranscribeHandler.swift        # Speech STT
+│       ├── SpeechSynthHandler.swift       # AVFoundation TTS
+│       └── SoundHandler.swift             # SoundAnalysis
+└── test-assets/                   # sample images for testing
 ```
-
----
 
 ## License
 
