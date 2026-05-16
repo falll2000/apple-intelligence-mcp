@@ -193,10 +193,12 @@ struct CoreService {
                 return .fail(id: request.id, error: "缺少 image_path_1 或 image_path_2")
             }
             let distance = try await visionExt.imageSimilarity(path1: path1, path2: path2)
+            // VNFeaturePrintObservation.computeDistance 回 L2 距離，值域約 [0, 2]
+            // 0=同檔，0.04≈near-duplicate，0.5~0.8≈同類別，>0.8≈無關
             let description: String
-            if distance < 5 { description = "非常相似" }
-            else if distance < 15 { description = "相似" }
-            else if distance < 30 { description = "有些相近" }
+            if distance < 0.1 { description = "非常相似" }
+            else if distance < 0.4 { description = "相似" }
+            else if distance < 0.8 { description = "有些相近" }
             else { description = "差異明顯" }
             return .ok(id: request.id, result: [
                 "distance": .double(distance),
