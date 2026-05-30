@@ -192,14 +192,20 @@ echo "  Other AI clients (HTTP mode, already running in the background)"
 echo "  MCP Endpoint: http://127.0.0.1:11435/mcp"
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  OpenClaw (HTTP mode)"
+echo "  openclaw mcp set apple-intelligence \\"
+echo "    '{\"url\":\"http://127.0.0.1:11435/mcp\",\"transport\":\"streamable-http\"}'"
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "Logs: tail -f /tmp/apple-intel-mcp.log"
 echo ""
 
-# Detect hermes and suggest installing the integration
-if [ -f "$HOME/Library/LaunchAgents/ai.hermes.gateway.plist" ]; then
+# Detect an agent gateway and suggest installing the integration
+if [ -f "$HOME/Library/LaunchAgents/ai.hermes.gateway.plist" ] || \
+   [ -f "$HOME/Library/LaunchAgents/ai.openclaw.gateway.plist" ]; then
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo "  hermes gateway detected"
-    echo "  To link hermes gateway start/stop/restart with MCP:"
-    echo "    ./install-hermes-integration.sh"
+    echo "  agent gateway detected (hermes/openclaw)"
+    echo "  To link gateway start/stop/restart with MCP:"
+    echo "    ./install-integration.sh"
     echo ""
 fi

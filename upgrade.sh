@@ -167,5 +167,19 @@ else
     warn "launchd agent is not installed. Run 'bash install.sh' if you need the HTTP background service."
 fi
 
+# ── 6. Refresh the lifecycle watchdog if it's installed ─────
+# The watchdog runs from a copy under $HOME, so re-run install-integration.sh
+# to pick up watchdog changes in the new release and migrate any legacy
+# per-agent watchdog to the unified com.apple-intel-mcp.watchdog.
+WATCHDOG_SCRIPT="$HOME/Library/Application Support/apple-intel-mcp/mcp-watchdog.sh"
+WD_INSTALLED=0
+for L in com.apple-intel-mcp.watchdog com.apple-intel-mcp.hermes-watchdog com.apple-intel-mcp.openclaw-watchdog; do
+    launchctl print "${DOMAIN}/${L}" >/dev/null 2>&1 && WD_INSTALLED=1
+done
+if [ "$WD_INSTALLED" = "1" ] || [ -f "$WATCHDOG_SCRIPT" ]; then
+    info "Refreshing agent lifecycle watchdog..."
+    bash "$REPO_DIR/install-integration.sh"
+fi
+
 echo ""
 echo "Upgrade complete."
