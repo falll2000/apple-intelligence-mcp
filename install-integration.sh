@@ -5,7 +5,7 @@
 # Installs one launchd watchdog that drives MCP from the agent gateways listed
 # in bin/mcp-watchdog.sh (hermes / openclaw). After install:
 #   - any gateway start    -> MCP starts   (within 3 seconds)
-#   - any gateway restart  -> MCP restarts (within 3 seconds)
+#   - gateway restarts     -> MCP stays up; the gateway reconnects
 #   - all gateways stopped -> MCP stops    (within 3 seconds)
 #
 # This script only installs the watchdog; run ./install.sh first to install MCP itself.
@@ -20,6 +20,7 @@ PLIST_WATCHDOG="$PLIST_DIR/com.apple-intel-mcp.watchdog.plist"
 WATCHDOG_DIR="$HOME/Library/Application Support/apple-intel-mcp"
 WATCHDOG_SCRIPT="$WATCHDOG_DIR/mcp-watchdog.sh"
 DOMAIN="gui/$(id -u)"
+WATCHDOG_TARGET="${DOMAIN}/com.apple-intel-mcp.watchdog"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -78,11 +79,15 @@ EOF
 info "Watchdog plist written"
 
 # 3. bootstrap
-launchctl bootout "${DOMAIN}/com.apple-intel-mcp.watchdog" 2>/dev/null || true
-launchctl bootstrap "$DOMAIN" "$PLIST_WATCHDOG"
-info "Watchdog started (syncs MCP with hermes/openclaw every 3 seconds)"
+launchctl bootout "$WATCHDOG_TARGET" 2>/dev/null || true
+if launchctl bootstrap "$DOMAIN" "$PLIST_WATCHDOG" &&
+   launchctl print "$WATCHDOG_TARGET" >/dev/null 2>&1; then
+    info "Watchdog started (keeps MCP alive while hermes/openclaw is running)"
+else
+    error "Watchdog failed to start"
+fi
 
 echo ""
-echo "Done. MCP now follows whichever agent gateway is running."
+echo "Done. MCP now stays up while any agent gateway is running."
 echo "Watchdog logs: tail -f /tmp/apple-intel-mcp.watchdog.log"
 echo "Remove integration: ./uninstall-integration.sh"

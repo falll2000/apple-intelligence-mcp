@@ -14,7 +14,9 @@ leaves your Mac.
 
 ---
 
-## Why this exists
+## Overview
+
+### Why this exists
 
 Cloud LLM tokens are expensive for high-volume deterministic work (translation,
 summarization, OCR, transcription). Apple Silicon Macs ship a capable on-device
@@ -26,7 +28,7 @@ Concretely it lets a host model say *"OCR this image"*, *"transcribe this
 audio"*, *"polish this Discord reply"*, *"summarize this meeting log"* — and
 the work happens locally in milliseconds, free.
 
-## What you can build with it
+### What you can build with it
 
 - **Discord / chat copilot**
   `proofread_text`, `rewrite_text(tone="professional")`, `summarize_text`
@@ -50,7 +52,9 @@ the work happens locally in milliseconds, free.
 
 ---
 
-## Requirements
+## Quickstart
+
+### Requirements
 
 - Apple Silicon Mac (M1 or later)
 - macOS 26 (Tahoe) or later
@@ -58,7 +62,7 @@ the work happens locally in milliseconds, free.
 - Full Xcode (Command Line Tools alone don't ship the FoundationModels macros)
 - Homebrew + Python 3.10+ (`brew install python3`)
 
-## Install
+### Install
 
 ```bash
 git clone https://github.com/falll2000/apple-intelligence-mcp.git
@@ -72,7 +76,7 @@ The script will:
 3. Register the server as a launchd agent (`com.apple-intel-mcp.server`) on port 11435
 4. Print the exact config snippet for your AI client
 
-## Connect a client
+### Connect a client
 
 **Claude Desktop (stdio)** — edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -135,96 +139,46 @@ Hide tools you don't want exposed via `mcp_servers.apple-intelligence.tools.excl
 in `~/.hermes/config.yaml` — e.g. the English-only NL tools for Chinese-heavy use
 (see [Language coverage](#language-coverage)).
 
----
+### Recommended host system prompt
 
-## Architecture
-
-```
-┌────────────────────────────────────────────┐
-│        AI Client (Claude / GPT / etc.)     │
-└──────────────────┬─────────────────────────┘
-                   │  MCP protocol
-                   │  (stdio  OR  streamable-http :11435)
-                   ▼
-┌────────────────────────────────────────────┐
-│   Python FastMCP server                    │
-│   mcp-server/server.py                     │
-│   - 21 @mcp.tool definitions               │
-│   - SwiftBridge: persistent subprocess +   │
-│     async lock + JSON line protocol        │
-└──────────────────┬─────────────────────────┘
-                   │  stdin/stdout JSON lines
-                   │  (IPCRequest / IPCResponse)
-                   ▼
-┌────────────────────────────────────────────┐
-│   Swift Core Service (long-lived process)  │
-│   swift-core/AppleIntelCore                │
-│   - CoreService.swift   (request router)   │
-│   - per-domain handlers (see modules)      │
-│   - Apple frameworks loaded once on launch │
-└──────────────────┬─────────────────────────┘
-                   │
-                   ▼
-       FoundationModels  ←─ on-device LLM (~3B)
-       Vision            ←─ 18 image / pose tasks
-       NaturalLanguage   ←─ tokenize / NER / POS …
-       Speech            ←─ offline STT
-       AVFoundation      ←─ offline TTS
-       SoundAnalysis     ←─ audio classification
-```
-
-**Why two processes?** FastMCP is Python-native; Apple AI frameworks are
-Swift-only. The Swift binary stays resident so frameworks (which take seconds
-to initialize) load once. The Python layer is thin — it handles MCP protocol,
-schema/description, and serialization. Each `await bridge.call(...)` writes one
-JSON line to stdin, reads one JSON line from stdout, under an `asyncio.Lock`
-to keep the request/response stream serialized.
-
-## Module structure
-
-`swift-core/Sources/AppleIntelCore/` is split one handler per Apple-framework
-concern. Adding a new tool follows a predictable pattern:
+The host model decides whether to call these tools based on its system prompt
+plus the tool descriptions. The server uses `WHEN: / NOT FOR:` descriptions to
+help, but the host needs an explicit policy too. Paste the following into your
+client's system prompt for reliable routing:
 
 ```
-main.swift                 ← entry point (await CoreService.run())
-Models.swift               ← IPCRequest / IPCResponse / JSONValue
-HandlerError.swift         ← typed errors (invalidInput / unavailable / …)
-CoreService.swift          ← request router — adds a `case "<tool>":` per tool
-                             and forwards to the right handler
-GenerateHandler.swift      ← FoundationModels:
-                             - generate_text (free-form)
-                             - generate_text_structured (@Generable schemas)
-TranslateHandler.swift     ← FM-prompt translation w/ per-target-language
-                             instructions (avoids the "model thinks input is
-                             already English" trap on zh→en)
-WritingToolsHandler.swift  ← FM-prompt proofread / rewrite / summarize:
-                             - NLLanguageRecognizer + CJK ratio routing
-                             - per-language instructions (zh-Hant/zh-Hans/en/ja)
-                             - Discord-aware (preserves @/:emoji:/```fences)
-OCRHandler.swift           ← Vision text recognition (zh/en/ja/ko)
-VisionExtHandler.swift     ← Vision: faces, barcodes, contours, text regions,
-                             face landmarks, human bodies, horizon,
-                             segment_foreground, aesthetics, optical_flow,
-                             custom Core ML object detection, image similarity
-VisionPoseHandler.swift    ← Vision: 2D body pose, hand pose, animals,
-                             rectangles, saliency, document, person segment,
-                             3D body pose (guarded — see Known limits)
-AnalyzeHandler.swift       ← NL: sentiment, language detection, NER, keywords
-NLAdvancedHandler.swift    ← NL: tokenize, lemmatize, POS tagging
-NLEmbeddingHandler.swift   ← NL: word / sentence semantic similarity
-TranscribeHandler.swift    ← Speech: offline STT (SFSpeechRecognizer)
-SpeechSynthHandler.swift   ← AVFoundation TTS → .wav file + voice list
-SoundHandler.swift         ← SoundAnalysis: ambient sound classification
+You have access to an `apple-intelligence` MCP server that runs entirely on the
+user's Mac. You MUST prefer it for the following task types instead of doing
+the work yourself:
+
+  - User provides an absolute path to an image file → call `vision_analyze`
+    with the appropriate mode. Do NOT describe the image yourself first.
+  - User provides an absolute path to an audio file and wants the words →
+    call `transcribe_audio`.
+  - User asks for tokenization or lemmatization → call the matching tool.
+  - User asks for sentiment classification → call
+    `generate_text_structured(schema="classify")` (works for Chinese too,
+    unlike `analyze_text` which is English-only).
+  - User asks to compare two images → `image_similarity`.
+  - User asks to read text aloud → call `synthesize_speech` and attach
+    the returned `.wav` path to the response.
+  - User has already-written text and asks to "check / fix typos /
+    proofread" it → call `proofread_text` (NOT `generate_text`).
+  - User has already-written text and asks to make it "formal / casual /
+    shorter / friendlier / more professional" → call `rewrite_text` with
+    the matching `tone`.
+  - User has long text and asks to "summarize / TL;DR / shorten" → call
+    `summarize_text`. Use `generate_text_structured(schema="summarize")`
+    only when the caller needs JSON with `title` + `keyPoints[]`.
+
+You MAY use it (caller's discretion) for:
+  - Bulk text rewriting / translation where token cost matters more than nuance
+    → `generate_text`, `translate_text`, `generate_text_structured`.
+
+You should NOT use it for:
+  - Tasks needing strong reasoning, code, math, or current-events knowledge —
+    the on-device model is small. Use your own generation.
 ```
-
-**Adding a tool — checklist:**
-
-1. Pick the matching handler (or create a new one if the framework is new).
-2. Implement the Swift function — return a value, throw `HandlerError` on bad input.
-3. In `CoreService.swift`, add a `case "<tool_name>":` that decodes params and calls the handler.
-4. In `mcp-server/server.py`, add an `@mcp.tool()` function with WHEN/NOT-FOR docstring and an `await bridge.call("<tool_name>", {...})`.
-5. Rebuild Swift (`swift build -c release`), restart MCP (`launchctl kickstart -k gui/$UID/com.apple-intel-mcp.server`).
-6. Document in this README + `README.zh-Hant.md`.
 
 ---
 
@@ -312,50 +266,9 @@ two images, or a custom model — not a single image path):
 
 ---
 
-## Recommended host system prompt
+## Tool behavior and limits
 
-The host model decides whether to call these tools based on its system prompt
-plus the tool descriptions. The server uses `WHEN: / NOT FOR:` descriptions to
-help, but the host needs an explicit policy too. Paste the following into your
-client's system prompt for reliable routing:
-
-```
-You have access to an `apple-intelligence` MCP server that runs entirely on the
-user's Mac. You MUST prefer it for the following task types instead of doing
-the work yourself:
-
-  - User provides an absolute path to an image file → call `vision_analyze`
-    with the appropriate mode. Do NOT describe the image yourself first.
-  - User provides an absolute path to an audio file and wants the words →
-    call `transcribe_audio`.
-  - User asks for tokenization or lemmatization → call the matching tool.
-  - User asks for sentiment classification → call
-    `generate_text_structured(schema="classify")` (works for Chinese too,
-    unlike `analyze_text` which is English-only).
-  - User asks to compare two images → `image_similarity`.
-  - User asks to read text aloud → call `synthesize_speech` and attach
-    the returned `.wav` path to the response.
-  - User has already-written text and asks to "check / fix typos /
-    proofread" it → call `proofread_text` (NOT `generate_text`).
-  - User has already-written text and asks to make it "formal / casual /
-    shorter / friendlier / more professional" → call `rewrite_text` with
-    the matching `tone`.
-  - User has long text and asks to "summarize / TL;DR / shorten" → call
-    `summarize_text`. Use `generate_text_structured(schema="summarize")`
-    only when the caller needs JSON with `title` + `keyPoints[]`.
-
-You MAY use it (caller's discretion) for:
-  - Bulk text rewriting / translation where token cost matters more than nuance
-    → `generate_text`, `translate_text`, `generate_text_structured`.
-
-You should NOT use it for:
-  - Tasks needing strong reasoning, code, math, or current-events knowledge —
-    the on-device model is small. Use your own generation.
-```
-
----
-
-## Language coverage
+### Language coverage
 
 Apple's frameworks are uneven across languages. Vision, Speech, and
 FoundationModels handle Chinese well; the older NaturalLanguage and
@@ -383,7 +296,7 @@ For Chinese-heavy deployments, exclude the four ✗ tools at the host's MCP
 config layer (e.g. hermes' `mcp_servers.<name>.tools.exclude`) so the host
 LLM never tries to route Chinese requests to them.
 
-## Known limits
+### Known limits
 
 **Foundation Models safety filter** — `generate_text` and related tools may
 error on certain content. The filter is enforced inside the on-device model,
@@ -421,7 +334,9 @@ another unsandboxed local process. Sandboxed runners produce false
 
 ---
 
-## Manage the service (HTTP mode)
+## Operations
+
+### Manage the service (HTTP mode)
 
 `install.sh` registers a launchd agent that starts at login and auto-restarts
 on crash. Manual control:
@@ -433,7 +348,64 @@ tail -f /tmp/apple-intel-mcp.log                        # logs
 launchctl kickstart -k gui/$UID/com.apple-intel-mcp.server   # force restart
 ```
 
-## Upgrade
+### Agent lifecycle integration (optional)
+
+If you run an agent gateway — [hermes](https://github.com/NousResearch/hermes-agent) (`ai.hermes.gateway`)
+or [OpenClaw](https://openclaw.ai) (`ai.openclaw.gateway`) — and want its
+start/stop to drive the MCP server too:
+
+```bash
+bash install-integration.sh    # install watchdog
+bash uninstall-integration.sh  # remove watchdog (keeps mcp running)
+```
+
+This installs one launchd agent (`com.apple-intel-mcp.watchdog`) that polls
+every 3 s and keeps the MCP server alive while any gateway is up. It is
+**consumer-aware**: MCP stays up while **any** gateway is loaded and only stops
+once **all** are gone.
+
+| Gateway action | MCP reaction (≤ 3 s lag) |
+|---|---|
+| any gateway starts | `bootstrap` MCP |
+| all gateways stopped | `bootout` MCP |
+| a gateway restarts | nothing — MCP stays up; the gateway reconnects to it |
+
+The watchdog is **keep-alive only**: it never restarts MCP on a gateway restart.
+MCP is a stable HTTP endpoint each gateway reconnects to on its own, so bouncing
+it would needlessly drop other connected agents. If MCP itself crashes, its
+launchd plist (`KeepAlive=true`) revives it.
+
+Verify the integration:
+
+```bash
+launchctl print gui/$UID/com.apple-intel-mcp.watchdog
+launchctl print gui/$UID/com.apple-intel-mcp.server
+```
+
+The watchdog is an interval job, so it normally appears as `spawn scheduled` or
+`not running` between polls. Check `runs` and `last exit code = 0` to confirm it
+is healthy.
+
+The integration is purely additive — MCP runs fine on its own. To support
+another agent, add its launchd label to `CONSUMER_LABELS` in
+`bin/mcp-watchdog.sh`, then rerun `bash install-integration.sh` so the copy under
+`~/Library/Application Support/apple-intel-mcp/` is refreshed. `install.sh`
+prints a hint if it detects a gateway installed.
+
+Manual lifecycle scripts still work:
+
+```bash
+bash stop.sh   # stops the watchdog first, then MCP
+bash start.sh  # starts MCP, then the watchdog if the integration is installed
+```
+
+> Implementation note: the watchdog script is copied into
+> `~/Library/Application Support/apple-intel-mcp/` at install time, because
+> launchd refuses to execute shell scripts directly from `/Volumes/` on
+> macOS 26 (TCC blocks it as "Operation not permitted"). The Python venv
+> binary doesn't hit this restriction.
+
+### Upgrade
 
 ```bash
 bash upgrade.sh          # latest GitHub Release
@@ -448,38 +420,7 @@ watchdog to the unified one). If tracked files have local changes, the script
 stops before checkout so it does not overwrite your work. For non-standard
 GitHub remotes, set `APPLE_INTEL_RELEASE_REPO=owner/repo`.
 
-## Agent lifecycle integration (optional)
-
-If you run an agent gateway — [hermes](https://github.com/NousResearch/hermes-agent) (`ai.hermes.gateway`)
-or [OpenClaw](https://openclaw.ai) (`ai.openclaw.gateway`) — and want its
-start/stop/restart to drive the MCP server too:
-
-```bash
-bash install-integration.sh    # install watchdog
-bash uninstall-integration.sh  # remove watchdog (keeps mcp running)
-```
-
-This installs one launchd agent (`com.apple-intel-mcp.watchdog`) that polls
-every 3 s and mirrors the gateways onto the MCP server. It is **consumer-aware**:
-MCP stays up while **any** gateway is loaded and only stops once **all** are gone.
-
-| Gateway action | MCP reaction (≤ 3 s lag) |
-|---|---|
-| any gateway starts | `bootstrap` MCP |
-| any gateway restarts | `kickstart -k` MCP (PID change detection) |
-| all gateways stopped | `bootout` MCP |
-
-The integration is purely additive — MCP runs fine on its own. To support
-another agent, add its launchd label to `CONSUMER_LABELS` in `bin/mcp-watchdog.sh`.
-`install.sh` prints a hint if it detects a gateway installed.
-
-> Implementation note: the watchdog script is copied into
-> `~/Library/Application Support/apple-intel-mcp/` at install time, because
-> launchd refuses to execute shell scripts directly from `/Volumes/` on
-> macOS 26 (TCC blocks it as "Operation not permitted"). The Python venv
-> binary doesn't hit this restriction.
-
-## Uninstall
+### Uninstall
 
 ```bash
 bash uninstall.sh   # removes mcp + watchdog (if installed)
@@ -487,7 +428,100 @@ bash uninstall.sh   # removes mcp + watchdog (if installed)
 
 ---
 
-## Project structure
+## Development
+
+### Architecture
+
+```
+┌────────────────────────────────────────────┐
+│        AI Client (Claude / GPT / etc.)     │
+└──────────────────┬─────────────────────────┘
+                   │  MCP protocol
+                   │  (stdio  OR  streamable-http :11435)
+                   ▼
+┌────────────────────────────────────────────┐
+│   Python FastMCP server                    │
+│   mcp-server/server.py                     │
+│   - 21 @mcp.tool definitions               │
+│   - SwiftBridge: persistent subprocess +   │
+│     async lock + JSON line protocol        │
+└──────────────────┬─────────────────────────┘
+                   │  stdin/stdout JSON lines
+                   │  (IPCRequest / IPCResponse)
+                   ▼
+┌────────────────────────────────────────────┐
+│   Swift Core Service (long-lived process)  │
+│   swift-core/AppleIntelCore                │
+│   - CoreService.swift   (request router)   │
+│   - per-domain handlers (see modules)      │
+│   - Apple frameworks loaded once on launch │
+└──────────────────┬─────────────────────────┘
+                   │
+                   ▼
+       FoundationModels  ←─ on-device LLM (~3B)
+       Vision            ←─ 18 image / pose tasks
+       NaturalLanguage   ←─ tokenize / NER / POS …
+       Speech            ←─ offline STT
+       AVFoundation      ←─ offline TTS
+       SoundAnalysis     ←─ audio classification
+```
+
+**Why two processes?** FastMCP is Python-native; Apple AI frameworks are
+Swift-only. The Swift binary stays resident so frameworks (which take seconds
+to initialize) load once. The Python layer is thin — it handles MCP protocol,
+schema/description, and serialization. Each `await bridge.call(...)` writes one
+JSON line to stdin, reads one JSON line from stdout, under an `asyncio.Lock`
+to keep the request/response stream serialized.
+
+### Module structure
+
+`swift-core/Sources/AppleIntelCore/` is split one handler per Apple-framework
+concern. Adding a new tool follows a predictable pattern:
+
+```
+main.swift                 ← entry point (await CoreService.run())
+Models.swift               ← IPCRequest / IPCResponse / JSONValue
+HandlerError.swift         ← typed errors (invalidInput / unavailable / …)
+CoreService.swift          ← request router — adds a `case "<tool>":` per tool
+                             and forwards to the right handler
+GenerateHandler.swift      ← FoundationModels:
+                             - generate_text (free-form)
+                             - generate_text_structured (@Generable schemas)
+TranslateHandler.swift     ← FM-prompt translation w/ per-target-language
+                             instructions (avoids the "model thinks input is
+                             already English" trap on zh→en)
+WritingToolsHandler.swift  ← FM-prompt proofread / rewrite / summarize:
+                             - NLLanguageRecognizer + CJK ratio routing
+                             - per-language instructions (zh-Hant/zh-Hans/en/ja)
+                             - Discord-aware (preserves @/:emoji:/```fences)
+OCRHandler.swift           ← Vision text recognition (zh/en/ja/ko)
+VisionExtHandler.swift     ← Vision: faces, barcodes, contours, text regions,
+                             face landmarks, human bodies, horizon,
+                             segment_foreground, aesthetics, optical_flow,
+                             custom Core ML object detection, image similarity
+VisionPoseHandler.swift    ← Vision: 2D body pose, hand pose, animals,
+                             rectangles, saliency, document, person segment,
+                             3D body pose (guarded — see Known limits)
+AnalyzeHandler.swift       ← NL: sentiment, language detection, NER, keywords
+NLAdvancedHandler.swift    ← NL: tokenize, lemmatize, POS tagging
+NLEmbeddingHandler.swift   ← NL: word / sentence semantic similarity
+TranscribeHandler.swift    ← Speech: offline STT (SFSpeechRecognizer)
+SpeechSynthHandler.swift   ← AVFoundation TTS → .wav file + voice list
+SoundHandler.swift         ← SoundAnalysis: ambient sound classification
+```
+
+**Adding a tool — checklist:**
+
+1. Pick the matching handler (or create a new one if the framework is new).
+2. Implement the Swift function — return a value, throw `HandlerError` on bad input.
+3. In `CoreService.swift`, add a `case "<tool_name>":` that decodes params and calls the handler.
+4. In `mcp-server/server.py`, add an `@mcp.tool()` function with WHEN/NOT-FOR docstring and an `await bridge.call("<tool_name>", {...})`.
+5. Rebuild Swift (`swift build -c release`), restart MCP (`launchctl kickstart -k gui/$UID/com.apple-intel-mcp.server`).
+6. Document in this README + `README.zh-Hant.md`.
+
+---
+
+### Project structure
 
 ```
 apple-intelligence-mcp/
@@ -521,6 +555,8 @@ apple-intelligence-mcp/
 └── test-assets/                   # sample images for testing
 ```
 
+---
+
 ## Disclaimer
 
 This project is provided for educational and personal-productivity purposes
@@ -528,6 +564,8 @@ only, on an "as is" basis without warranty of any kind. You are solely
 responsible for the content you process with it and for complying with all
 applicable laws and the terms of service of any third-party website or service
 you interact with. The authors accept no liability for any misuse.
+
+---
 
 ## License
 

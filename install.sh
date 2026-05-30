@@ -205,7 +205,7 @@ if [ -f "$HOME/Library/LaunchAgents/ai.hermes.gateway.plist" ] || \
    [ -f "$HOME/Library/LaunchAgents/ai.openclaw.gateway.plist" ]; then
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "  agent gateway detected (hermes/openclaw)"
-    echo "  To link gateway start/stop/restart with MCP:"
+    echo "  To link gateway start/stop with MCP:"
     echo "    ./install-integration.sh"
     echo ""
 fi
