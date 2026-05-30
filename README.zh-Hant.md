@@ -221,7 +221,7 @@ SoundHandler.swift         ← SoundAnalysis：環境音分類
 > 本機圖片路徑。把它們收成單一的 `vision_analyze(mode=...)`，比起對外宣告 18 支
 > 幾乎一模一樣的工具，實測能明顯提升 host LLM 選工具的準確度，也縮小每次請求都要
 > 攜帶的工具清單 token。第 19 種能力 `body_pose_3d` 在 Swift core 裡存在，但**刻意
-> 不**開成 mode——詳見 [Known limits](#known-limits)。
+> 不**開成 mode——詳見 [已知限制](#已知限制)。
 
 其餘 Vision 工具維持獨立，因為它們的輸入不同（影片、兩張圖、或自備模型，而非單張
 圖片路徑）：

@@ -222,7 +222,7 @@ SoundHandler.swift         ← SoundAnalysis：环境音分类
 > 路径。把它们收成单一的 `vision_analyze(mode=...)`，比起对外声明 18 个几乎一样的
 > 工具，实测能明显提升 host LLM 选工具的准确度，也缩小每次请求都要携带的工具清单
 > token。第 19 种能力 `body_pose_3d` 在 Swift core 里存在，但**刻意不**开成
-> mode——详见 [Known limits](#known-limits)。
+> mode——详见 [已知限制](#已知限制)。
 
 其余 Vision 工具保持独立，因为它们的输入不同（视频、两张图、或自备模型，而非单张
 图片路径）：
