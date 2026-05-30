@@ -192,13 +192,46 @@ SoundHandler.swift         ← SoundAnalysis：環境音分類
 
 ### Vision — 圖像 / 姿態
 
+**`vision_analyze`** 是單張圖片的入口：用一支 MCP 工具，透過 `mode` 參數提供
+**18 種不同的 Vision 能力**（一次選一種）：
+
+| `mode` | 能力 |
+|--------|------|
+| `ocr` | 從圖片擷取文字（zh-Hant / zh-Hans / en / ja / ko） |
+| `classify` | 場景 / 物件標籤與信心值 |
+| `faces` | 人臉數量 + 邊界框 |
+| `face_landmarks` | 每張臉的眼 / 鼻 / 嘴 / 輪廓特徵點 |
+| `barcodes` | QR / EAN-13 / Code-128 / PDF417 等 |
+| `text_regions` | 只回文字邊界框（不做 OCR 內容） |
+| `contours` | 邊緣 / 輪廓偵測 |
+| `human_bodies` | 人體邊界框（`upper_body_only=True` 只取上半身） |
+| `rectangles` | 矩形區域（卡片、螢幕、白板） |
+| `horizon` | 地平線角度——照片有沒有歪？ |
+| `saliency` | 視覺注意力熱區圖 |
+| `document` | 紙張 / 文件邊界框 |
+| `segment_person` | 人物存在與遮罩大小 |
+| `segment_foreground` | 各實例前景遮罩 |
+| `aesthetics` | 美感分數 0–1 + 工具性圖片旗標 |
+| `body_pose` | 2D 人體關節（15 個關鍵點） |
+| `hand_pose` | 手部關節 + 左 / 右手 |
+| `animals` | 貓 / 狗偵測 |
+
+> **為什麼用一支 router，而不是 18 支工具？** 這每一種底層都是獨立的 Apple
+> Vision request（Swift core 裡也各是一個 `case`），但它們的輸入完全相同——一個
+> 本機圖片路徑。把它們收成單一的 `vision_analyze(mode=...)`，比起對外宣告 18 支
+> 幾乎一模一樣的工具，實測能明顯提升 host LLM 選工具的準確度，也縮小每次請求都要
+> 攜帶的工具清單 token。第 19 種能力 `body_pose_3d` 在 Swift core 裡存在，但**刻意
+> 不**開成 mode——詳見 [Known limits](#known-limits)。
+
+其餘 Vision 工具維持獨立，因為它們的輸入不同（影片、兩張圖、或自備模型，而非單張
+圖片路徑）：
+
 | 工具 | 說明 |
 |------|-------------|
-| `vision_analyze` | 18 種單張圖片任務的入口。`mode` 可選 `ocr`, `classify`, `faces`, `face_landmarks`, `barcodes`, `text_regions`, `contours`, `human_bodies`, `rectangles`, `horizon`, `saliency`, `document`, `segment_person`, `segment_foreground`, `aesthetics`, `body_pose`, `hand_pose`, `animals` |
-| `image_similarity` | 兩張本機圖片的視覺相似度（Vision feature print L2 距離，閾值已調為 0.1 / 0.4 / 0.8） |
-| `detect_optical_flow` | 兩張連續畫面間的每像素移動向量 |
-| `detect_trajectories` | 在本機影片中偵測拋物線軌跡 |
-| `detect_objects` | 用你自備的 Core ML 模型（`.mlmodel` / `.mlmodelc`）做物件偵測 |
+| `image_similarity` | **兩張**本機圖片的視覺相似度（Vision feature print L2 距離，閾值已調為 0.1 / 0.4 / 0.8） |
+| `detect_optical_flow` | **兩張**連續畫面間的每像素移動向量 |
+| `detect_trajectories` | 在本機**影片**中偵測拋物線軌跡 |
+| `detect_objects` | 用你**自備的 Core ML 模型**（`.mlmodel` / `.mlmodelc`）做物件偵測 |
 
 ### Natural Language
 

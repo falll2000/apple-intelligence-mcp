@@ -193,13 +193,46 @@ SoundHandler.swift         ← SoundAnalysis：环境音分类
 
 ### Vision — 图像 / 姿态
 
+**`vision_analyze`** 是单图入口：用一个 MCP 工具，通过 `mode` 参数提供 **18 种不同
+的 Vision 能力**（一次选一种）：
+
+| `mode` | 能力 |
+|--------|------|
+| `ocr` | 从图片提取文字（zh-Hant / zh-Hans / en / ja / ko） |
+| `classify` | 场景 / 物体标签与置信度 |
+| `faces` | 人脸数量 + 边界框 |
+| `face_landmarks` | 每张脸的眼 / 鼻 / 嘴 / 轮廓特征点 |
+| `barcodes` | QR / EAN-13 / Code-128 / PDF417 等 |
+| `text_regions` | 只返回文字边界框（不做 OCR 内容） |
+| `contours` | 边缘 / 轮廓检测 |
+| `human_bodies` | 人体边界框（`upper_body_only=True` 只取上半身） |
+| `rectangles` | 矩形区域（卡片、屏幕、白板） |
+| `horizon` | 地平线角度——照片有没有歪？ |
+| `saliency` | 视觉注意力热区图 |
+| `document` | 纸张 / 文档边界框 |
+| `segment_person` | 人物存在与遮罩大小 |
+| `segment_foreground` | 各实例前景遮罩 |
+| `aesthetics` | 美学评分 0–1 + 工具性图片标记 |
+| `body_pose` | 2D 人体关节（15 个关键点） |
+| `hand_pose` | 手部关节 + 左 / 右手 |
+| `animals` | 猫 / 狗检测 |
+
+> **为什么用一个 router，而不是 18 个工具？** 这每一种底层都是独立的 Apple Vision
+> request（Swift core 里也各是一个 `case`），但它们的输入完全相同——一个本地图片
+> 路径。把它们收成单一的 `vision_analyze(mode=...)`，比起对外声明 18 个几乎一样的
+> 工具，实测能明显提升 host LLM 选工具的准确度，也缩小每次请求都要携带的工具清单
+> token。第 19 种能力 `body_pose_3d` 在 Swift core 里存在，但**刻意不**开成
+> mode——详见 [Known limits](#known-limits)。
+
+其余 Vision 工具保持独立，因为它们的输入不同（视频、两张图、或自备模型，而非单张
+图片路径）：
+
 | 工具 | 说明 |
 |------|-------------|
-| `vision_analyze` | 18 种单图任务的统一入口。`mode` 可选 `ocr`, `classify`, `faces`, `face_landmarks`, `barcodes`, `text_regions`, `contours`, `human_bodies`, `rectangles`, `horizon`, `saliency`, `document`, `segment_person`, `segment_foreground`, `aesthetics`, `body_pose`, `hand_pose`, `animals` |
-| `image_similarity` | 两张本地图片的视觉相似度（Vision feature print L2 距离，阈值已调成 0.1 / 0.4 / 0.8） |
-| `detect_optical_flow` | 两张连续帧之间的逐像素运动向量 |
-| `detect_trajectories` | 在本地视频中检测抛物线轨迹 |
-| `detect_objects` | 用你自备的 Core ML 模型（`.mlmodel` / `.mlmodelc`）做物体检测 |
+| `image_similarity` | **两张**本地图片的视觉相似度（Vision feature print L2 距离，阈值已调成 0.1 / 0.4 / 0.8） |
+| `detect_optical_flow` | **两张**连续帧之间的逐像素运动向量 |
+| `detect_trajectories` | 在本地**视频**中检测抛物线轨迹 |
+| `detect_objects` | 用你**自备的 Core ML 模型**（`.mlmodel` / `.mlmodelc`）做物体检测 |
 
 ### Natural Language
 

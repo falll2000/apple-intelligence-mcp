@@ -207,13 +207,48 @@ this measurably improves host-LLM tool-selection accuracy.
 
 ### Vision — image / pose
 
+**`vision_analyze`** is a single-image router: one MCP tool exposing **18 distinct
+Vision capabilities**, selected via the `mode` argument (pick exactly one):
+
+| `mode` | Capability |
+|--------|------------|
+| `ocr` | Extract text from the image (zh-Hant / zh-Hans / en / ja / ko) |
+| `classify` | Scene / object labels with confidence |
+| `faces` | Face count + bounding boxes |
+| `face_landmarks` | Eyes / nose / mouth / contour points per face |
+| `barcodes` | QR / EAN-13 / Code-128 / PDF417 etc. |
+| `text_regions` | Text bounding boxes only (no OCR content) |
+| `contours` | Edge / contour detection |
+| `human_bodies` | Person bounding boxes (`upper_body_only=True` for upper body) |
+| `rectangles` | Rectangular regions (cards, screens, whiteboards) |
+| `horizon` | Horizon angle — is the photo tilted? |
+| `saliency` | Visual attention map |
+| `document` | Paper / document bounding box |
+| `segment_person` | Person presence + mask size |
+| `segment_foreground` | Per-instance foreground masks |
+| `aesthetics` | Aesthetic score 0–1 + utility-image flag |
+| `body_pose` | 2D body joints (15 keypoints) |
+| `hand_pose` | Hand joints + left / right |
+| `animals` | Cat / dog detection |
+
+> **Why one router, not 18 tools?** Each of these is a separate Apple Vision
+> request under the hood (and a separate `case` in the Swift core), but they all
+> share the same input — one local image path. Collapsing them into a single
+> `vision_analyze(mode=...)` tool measurably improves host-LLM tool-selection
+> accuracy and shrinks the tool-list tokens every request carries, versus
+> advertising 18 near-identical tools. A 19th capability, `body_pose_3d`, exists
+> in the Swift core but is intentionally **not** exposed as a mode — see
+> [Known limits](#known-limits).
+
+The remaining Vision tools stay separate because their inputs differ (video,
+two images, or a custom model — not a single image path):
+
 | Tool | Description |
 |------|-------------|
-| `vision_analyze` | 18-task router. `mode` ∈ {`ocr`, `classify`, `faces`, `face_landmarks`, `barcodes`, `text_regions`, `contours`, `human_bodies`, `rectangles`, `horizon`, `saliency`, `document`, `segment_person`, `segment_foreground`, `aesthetics`, `body_pose`, `hand_pose`, `animals`} |
-| `image_similarity` | Visual similarity score between two image files (Vision feature print L2 distance, thresholds tuned 0.1 / 0.4 / 0.8) |
-| `detect_optical_flow` | Per-pixel motion vectors between two frames |
-| `detect_trajectories` | Parabolic trajectory detection on a local video file |
-| `detect_objects` | Object detection with a user-supplied Core ML model (`.mlmodel` / `.mlmodelc`) |
+| `image_similarity` | Visual similarity score between **two** image files (Vision feature print L2 distance, thresholds tuned 0.1 / 0.4 / 0.8) |
+| `detect_optical_flow` | Per-pixel motion vectors between **two** frames |
+| `detect_trajectories` | Parabolic trajectory detection on a local **video** file |
+| `detect_objects` | Object detection with a **user-supplied Core ML model** (`.mlmodel` / `.mlmodelc`) |
 
 ### Natural Language
 
