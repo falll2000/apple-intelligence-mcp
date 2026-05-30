@@ -9,6 +9,7 @@
 
 # Swift
 .build/
+.swiftpm/
 *.o
 *.d
 
