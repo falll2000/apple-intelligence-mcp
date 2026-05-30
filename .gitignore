@@ -1,0 +1,19 @@
+.DS_Store
+
+# Local agent/client settings
+.claude/
+
+# Runtime files
+*.log
+*.pid
+
+# Swift
+.build/
+*.o
+*.d
+
+# Python
+__pycache__/
+*.pyc
+.env
+venv/
