@@ -124,6 +124,17 @@ openclaw mcp list                        # verify it registered
 For a stdio setup instead (OpenClaw spawns the process), use the same
 `command` / `args` as the Claude Desktop block above under the server entry.
 
+**Hermes** — register with the `hermes mcp` CLI (points at the resident HTTP server):
+
+```bash
+hermes mcp add apple-intelligence --url http://127.0.0.1:11435/mcp
+hermes mcp test apple-intelligence    # verify connection + tool list
+```
+
+Hide tools you don't want exposed via `mcp_servers.apple-intelligence.tools.exclude`
+in `~/.hermes/config.yaml` — e.g. the English-only NL tools for Chinese-heavy use
+(see [Language coverage](#language-coverage)).
+
 ---
 
 ## Architecture
@@ -439,7 +450,7 @@ GitHub remotes, set `APPLE_INTEL_RELEASE_REPO=owner/repo`.
 
 ## Agent lifecycle integration (optional)
 
-If you run an agent gateway — [hermes](https://github.com/) (`ai.hermes.gateway`)
+If you run an agent gateway — [hermes](https://github.com/NousResearch/hermes-agent) (`ai.hermes.gateway`)
 or [OpenClaw](https://openclaw.ai) (`ai.openclaw.gateway`) — and want its
 start/stop/restart to drive the MCP server too:
 

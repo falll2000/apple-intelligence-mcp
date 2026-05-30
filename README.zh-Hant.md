@@ -121,6 +121,17 @@ openclaw mcp list                        # 確認已註冊
 想改用 stdio（由 OpenClaw 拉起行程），就在 server 項目裡填上面 Claude Desktop 區塊
 那組相同的 `command` / `args`。
 
+**Hermes** — 用 `hermes mcp` CLI 註冊（指向已常駐的 HTTP server）：
+
+```bash
+hermes mcp add apple-intelligence --url http://127.0.0.1:11435/mcp
+hermes mcp test apple-intelligence    # 驗證連線 + 工具列表
+```
+
+不想曝露的工具，可在 `~/.hermes/config.yaml` 用
+`mcp_servers.apple-intelligence.tools.exclude` 排除——例如中文場景排掉那幾個
+只支援英文的 NL 工具（見[中文支援狀況](#中文支援狀況)）。
+
 ---
 
 ## 架構
@@ -416,7 +427,7 @@ bash upgrade.sh v1.2.3   # 指定 GitHub Release tag
 
 ## Agent 生命週期整合（選用）
 
-如果你在跑 agent gateway——[hermes](https://github.com/)（`ai.hermes.gateway`）
+如果你在跑 agent gateway——[hermes](https://github.com/NousResearch/hermes-agent)（`ai.hermes.gateway`）
 或 [OpenClaw](https://openclaw.ai)（`ai.openclaw.gateway`）——並希望它的
 start/stop/restart 連動 MCP server：
 
