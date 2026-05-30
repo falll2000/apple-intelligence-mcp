@@ -95,6 +95,35 @@ The script will:
 http://127.0.0.1:11435/mcp
 ```
 
+**OpenClaw** — register under `mcp.servers` in `~/.openclaw/openclaw.json`. Since
+the HTTP server is already resident via launchd, point OpenClaw at it (no need to
+let OpenClaw spawn the process):
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "apple-intelligence": {
+        "url": "http://127.0.0.1:11435/mcp",
+        "transport": "streamable-http",
+        "connectionTimeoutMs": 10000
+      }
+    }
+  }
+}
+```
+
+Or register it from the CLI without editing the file:
+
+```bash
+openclaw mcp set apple-intelligence \
+  '{"url":"http://127.0.0.1:11435/mcp","transport":"streamable-http"}'
+openclaw mcp list                        # verify it registered
+```
+
+For a stdio setup instead (OpenClaw spawns the process), use the same
+`command` / `args` as the Claude Desktop block above under the server entry.
+
 ---
 
 ## Architecture
@@ -402,32 +431,36 @@ bash upgrade.sh v1.2.3   # a specific GitHub Release tag
 
 This resolves a GitHub Release tag, fetches tags, checks out that release in
 detached HEAD mode, rebuilds the Swift core, updates the Python venv
-dependencies, and restarts or starts the installed launchd service. If tracked
-files have local changes, the script stops before checkout so it does not
-overwrite your work. For non-standard GitHub remotes, set
-`APPLE_INTEL_RELEASE_REPO=owner/repo`.
+dependencies, restarts or starts the installed launchd service, and refreshes
+the agent lifecycle watchdog if it's installed (migrating any legacy per-agent
+watchdog to the unified one). If tracked files have local changes, the script
+stops before checkout so it does not overwrite your work. For non-standard
+GitHub remotes, set `APPLE_INTEL_RELEASE_REPO=owner/repo`.
 
-## Hermes integration (optional)
+## Agent lifecycle integration (optional)
 
-If you use [hermes](https://github.com/) and want `hermes gateway
-start/stop/restart` to drive the MCP server too:
+If you run an agent gateway — [hermes](https://github.com/) (`ai.hermes.gateway`)
+or [OpenClaw](https://openclaw.ai) (`ai.openclaw.gateway`) — and want its
+start/stop/restart to drive the MCP server too:
 
 ```bash
-bash install-hermes-integration.sh    # install watchdog
-bash uninstall-hermes-integration.sh  # remove watchdog (keeps mcp running)
+bash install-integration.sh    # install watchdog
+bash uninstall-integration.sh  # remove watchdog (keeps mcp running)
 ```
 
-This installs a second launchd agent (`com.apple-intel-mcp.hermes-watchdog`)
-that polls every 3 s and mirrors `ai.hermes.gateway` onto the MCP server:
+This installs one launchd agent (`com.apple-intel-mcp.watchdog`) that polls
+every 3 s and mirrors the gateways onto the MCP server. It is **consumer-aware**:
+MCP stays up while **any** gateway is loaded and only stops once **all** are gone.
 
-| Hermes action | MCP reaction (≤ 3 s lag) |
+| Gateway action | MCP reaction (≤ 3 s lag) |
 |---|---|
-| `hermes gateway stop` | `bootout` MCP |
-| `hermes gateway start` | `bootstrap` MCP |
-| `hermes gateway restart` | `kickstart -k` MCP (PID change detection) |
+| any gateway starts | `bootstrap` MCP |
+| any gateway restarts | `kickstart -k` MCP (PID change detection) |
+| all gateways stopped | `bootout` MCP |
 
-The integration is purely additive — MCP runs fine on its own. `install.sh`
-prints a hint if it detects hermes installed.
+The integration is purely additive — MCP runs fine on its own. To support
+another agent, add its launchd label to `CONSUMER_LABELS` in `bin/mcp-watchdog.sh`.
+`install.sh` prints a hint if it detects a gateway installed.
 
 > Implementation note: the watchdog script is copied into
 > `~/Library/Application Support/apple-intel-mcp/` at install time, because
@@ -448,10 +481,10 @@ bash uninstall.sh   # removes mcp + watchdog (if installed)
 ```
 apple-intelligence-mcp/
 ├── install.sh / upgrade.sh / uninstall.sh
-├── install-hermes-integration.sh / uninstall-hermes-integration.sh
+├── install-integration.sh / uninstall-integration.sh
 ├── start.sh / stop.sh
 ├── bin/
-│   └── hermes-watchdog.sh         # polls ai.hermes.gateway, syncs mcp state
+│   └── mcp-watchdog.sh            # polls hermes/openclaw gateways, syncs mcp state
 ├── mcp-server/
 │   ├── server.py                  # FastMCP server + SwiftBridge (~650 LOC)
 │   └── requirements.txt           # mcp>=1.0.0

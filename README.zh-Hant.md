@@ -93,6 +93,34 @@ bash install.sh
 http://127.0.0.1:11435/mcp
 ```
 
+**OpenClaw** — 在 `~/.openclaw/openclaw.json` 的 `mcp.servers` 底下註冊。HTTP server
+已由 launchd 常駐，所以讓 OpenClaw 直接連它即可（不必讓 OpenClaw 自己拉起行程）：
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "apple-intelligence": {
+        "url": "http://127.0.0.1:11435/mcp",
+        "transport": "streamable-http",
+        "connectionTimeoutMs": 10000
+      }
+    }
+  }
+}
+```
+
+或者用 CLI 註冊，免手改檔：
+
+```bash
+openclaw mcp set apple-intelligence \
+  '{"url":"http://127.0.0.1:11435/mcp","transport":"streamable-http"}'
+openclaw mcp list                        # 確認已註冊
+```
+
+想改用 stdio（由 OpenClaw 拉起行程），就在 server 項目裡填上面 Claude Desktop 區塊
+那組相同的 `command` / `args`。
+
 ---
 
 ## 架構
@@ -381,31 +409,35 @@ bash upgrade.sh v1.2.3   # 指定 GitHub Release tag
 ```
 
 這會解析 GitHub Release tag、fetch tags、以 detached HEAD 切到該 release、
-重建 Swift core、更新 Python venv 依賴，並重啟或啟動已安裝的 launchd 服務。
+重建 Swift core、更新 Python venv 依賴、重啟或啟動已安裝的 launchd 服務，
+並在 watchdog 已安裝時刷新它（順便把舊的 per-agent watchdog migrate 成統一版）。
 如果已追蹤檔案有本機變更，腳本會在 checkout 前停止，避免覆蓋你的修改。
 若 remote 不是標準 GitHub URL，可設定 `APPLE_INTEL_RELEASE_REPO=owner/repo`。
 
-## Hermes 整合（選用）
+## Agent 生命週期整合（選用）
 
-如果你也在用 [hermes](https://github.com/) 並希望 `hermes gateway
-start/stop/restart` 連動 MCP server：
+如果你在跑 agent gateway——[hermes](https://github.com/)（`ai.hermes.gateway`）
+或 [OpenClaw](https://openclaw.ai)（`ai.openclaw.gateway`）——並希望它的
+start/stop/restart 連動 MCP server：
 
 ```bash
-bash install-hermes-integration.sh    # 裝 watchdog
-bash uninstall-hermes-integration.sh  # 移除 watchdog（不影響 mcp 本體）
+bash install-integration.sh    # 裝 watchdog
+bash uninstall-integration.sh  # 移除 watchdog（不影響 mcp 本體）
 ```
 
-這會多裝一個 launchd agent（`com.apple-intel-mcp.hermes-watchdog`），每 3 秒
-查一次 `ai.hermes.gateway` 狀態並同步到 MCP server：
+這會裝一個 launchd agent（`com.apple-intel-mcp.watchdog`），每 3 秒輪詢這些
+gateway 並同步到 MCP server。它是 **consumer-aware**：只要**任一** gateway 還在，
+MCP 就維持；**全部**都停了才停 MCP。
 
-| Hermes 動作 | MCP 反應（最多 3 秒延遲） |
+| Gateway 動作 | MCP 反應（最多 3 秒延遲） |
 |---|---|
-| `hermes gateway stop` | `bootout` MCP |
-| `hermes gateway start` | `bootstrap` MCP |
-| `hermes gateway restart` | `kickstart -k` MCP（靠 PID 變化判斷） |
+| 任一 gateway 啟動 | `bootstrap` MCP |
+| 任一 gateway 重啟 | `kickstart -k` MCP（靠 PID 變化判斷） |
+| 全部 gateway 停止 | `bootout` MCP |
 
-整合是純加值的，不裝 MCP 也照樣跑。`install.sh` 偵測到 hermes 已安裝時會
-主動提示。
+整合是純加值的，不裝也照樣跑。要支援其他 agent，把它的 launchd label 加進
+`bin/mcp-watchdog.sh` 的 `CONSUMER_LABELS` 即可。`install.sh` 偵測到 gateway
+已安裝時會主動提示。
 
 > 實作小備註：watchdog 腳本在 install 時會複製一份到
 > `~/Library/Application Support/apple-intel-mcp/`，因為 macOS 26 launchd 拒絕
@@ -425,10 +457,10 @@ bash uninstall.sh   # 移除 mcp + watchdog（如果裝過）
 ```
 apple-intelligence-mcp/
 ├── install.sh / upgrade.sh / uninstall.sh
-├── install-hermes-integration.sh / uninstall-hermes-integration.sh
+├── install-integration.sh / uninstall-integration.sh
 ├── start.sh / stop.sh
 ├── bin/
-│   └── hermes-watchdog.sh         # 輪詢 ai.hermes.gateway，連動 mcp 狀態
+│   └── mcp-watchdog.sh            # 輪詢 hermes/openclaw gateway，連動 mcp 狀態
 ├── mcp-server/
 │   ├── server.py                  # FastMCP server + SwiftBridge（約 650 行）
 │   └── requirements.txt           # mcp>=1.0.0
