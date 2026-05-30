@@ -13,7 +13,9 @@ Language、Speech、Sound Analysis）封装成 21 个 [MCP](https://modelcontext
 
 ---
 
-## 这个项目是干嘛的
+## 概览
+
+### 这个项目是干嘛的
 
 OCR、翻译、摘要、语音识别这类流程固定、量又大的任务，全扔给云端 LLM 烧 token
 其实挺不划算的。Apple Silicon Mac 本身就内置一套相当能打的本地 AI 模型——只是
@@ -23,7 +25,7 @@ OCR、翻译、摘要、语音识别这类流程固定、量又大的任务，�
 可以直接把活儿派给你的 Mac：「OCR 这张图」、「转录这段录音」、「润色这条
 Discord 消息」、「总结这份会议纪要」——全在本地毫秒级完成，还不要钱。
 
-## 能拿来做什么
+### 能拿来做什么
 
 - **Discord / 聊天助手**
   用 `proofread_text` 抓错字、`rewrite_text(tone="professional")` 改语气、
@@ -47,7 +49,9 @@ Discord 消息」、「总结这份会议纪要」——全在本地毫秒级完
 
 ---
 
-## 系统要求
+## 快速开始
+
+### 系统要求
 
 - Apple Silicon Mac（M1 及以上）
 - macOS 26（Tahoe）及以上
@@ -55,7 +59,7 @@ Discord 消息」、「总结这份会议纪要」——全在本地毫秒级完
 - 完整 Xcode（光装 Command Line Tools 不够，缺 FoundationModels 宏）
 - Homebrew + Python 3.10+（`brew install python3`）
 
-## 安装
+### 安装
 
 ```bash
 git clone https://github.com/falll2000/apple-intelligence-mcp.git
@@ -70,7 +74,7 @@ bash install.sh
 3. 把服务（`com.apple-intel-mcp.server`）注册成 launchd agent，监听 11435 端口
 4. 打印出对应你机器路径的客户端配置，直接复制粘贴就行
 
-## 接到 AI 客户端
+### 接到 AI 客户端
 
 **Claude Desktop（stdio 模式）** — 编辑
 `~/Library/Application Support/Claude/claude_desktop_config.json`：
@@ -133,84 +137,46 @@ hermes mcp test apple-intelligence    # 验证连接 + 工具列表
 `mcp_servers.apple-intelligence.tools.exclude` 排除——例如中文场景排掉那几个
 只支持英文的 NL 工具（见[中文支持情况](#中文支持情况)）。
 
----
+### 推荐的 host system prompt
 
-## 架构
-
-```mermaid
-flowchart TD
-    Client["<b>AI 客户端</b><br/>Claude / GPT / Gemini / 等"]
-    MCP["<b>Python FastMCP server</b><br/><code>mcp-server/server.py</code><br/>• 定义 21 个 <code>@mcp.tool</code><br/>• SwiftBridge：常驻子进程<br/>+ async lock + JSON line protocol"]
-    Swift["<b>Swift Core Service</b>（常驻进程）<br/><code>swift-core/AppleIntelCore</code><br/>• <code>CoreService.swift</code>：请求路由<br/>• 每个 framework 对应一个 handler<br/>• 启动时把 Apple frameworks 加载一次"]
-
-    FM["<b>FoundationModels</b><br/>本地 LLM（约 3B）"]
-    Vis["<b>Vision</b><br/>18 种图像 / 姿态任务"]
-    NL["<b>NaturalLanguage</b><br/>分词 / NER / POS …"]
-    Sp["<b>Speech</b><br/>离线语音识别"]
-    AV["<b>AVFoundation</b><br/>离线文字转语音"]
-    SA["<b>SoundAnalysis</b><br/>环境音分类"]
-
-    Client -- "MCP 协议<br/>（stdio 或 streamable-http :11435）" --> MCP
-    MCP -- "stdin/stdout JSON lines<br/>（IPCRequest / IPCResponse）" --> Swift
-    Swift --> FM
-    Swift --> Vis
-    Swift --> NL
-    Swift --> Sp
-    Swift --> AV
-    Swift --> SA
-```
-
-**为什么要拆成两个进程？**
-FastMCP 是 Python 原生库；Apple AI 框架只有 Swift 能直接调。Swift 二进制做成
-常驻，是因为这些框架光初始化就要好几秒，每次重启太慢。Python 那层很薄，
-只处理 MCP 协议、工具描述跟序列化。每次 `bridge.call(...)` 就是往 Swift stdin
-写一行 JSON、从 stdout 读回一行 JSON——外面套一层 `asyncio.Lock` 保证请求／
-响应不会交错。
-
-## 模块结构
-
-Swift 端 `swift-core/Sources/AppleIntelCore/` 采用「一个 framework 对应一个
-handler」的拆法。加新工具有固定流程：
+要不要调这些工具，由 host model 根据自己的 system prompt 和工具描述决定。
+Server 这边的描述已经用 `WHEN: / NOT FOR:` 格式写过了，不过 host 端最好也加
+一份明确的策略。把下面这段贴到你 client 的 system prompt 里可以让路由更稳定
+（用英文写是因为大多数 host LLM 对英文指令最敏感）：
 
 ```
-main.swift                 ← 入口（await CoreService.run()）
-Models.swift               ← IPC 类型（IPCRequest / IPCResponse / JSONValue）
-HandlerError.swift         ← 自定义错误（invalidInput / unavailable / …）
-CoreService.swift          ← 请求路由——每个工具加一个 `case "<tool>":`
-                             转发给对应 handler
-GenerateHandler.swift      ← Foundation Models：
-                             - generate_text（自由生成）
-                             - generate_text_structured（@Generable 结构化）
-TranslateHandler.swift     ← 用 FM prompt 做翻译，每个目标语言写一套
-                             instructions（绕开 zh→en 时模型误判输入已经是英文的坑）
-WritingToolsHandler.swift  ← 校对 / 改写 / 摘要：
-                             - NLLanguageRecognizer + CJK 字符比例判断输入语言
-                             - 每个语言写一套 instructions（zh-Hant / zh-Hans / en / ja）
-                             - Discord-aware：保留 @ / :emoji: / ```code fence```
-OCRHandler.swift           ← Vision 文字识别（zh / en / ja / ko）
-VisionExtHandler.swift     ← Vision：人脸、条码、轮廓、文字区域、人脸关键点、
-                             人体检测、地平线、前景分割、美学评分、光流、
-                             自定义 Core ML 物体检测、图像相似度
-VisionPoseHandler.swift    ← Vision：2D 姿态、手部姿态、动物、矩形、
-                             saliency、文档、人像分割（3D 姿态已封死，见已知限制）
-AnalyzeHandler.swift       ← NaturalLanguage：情感、语言检测、命名实体、关键词
-NLAdvancedHandler.swift    ← NaturalLanguage：分词、词形还原、词性标注
-NLEmbeddingHandler.swift   ← NaturalLanguage：词 / 句语义相似度
-TranscribeHandler.swift    ← Speech 离线识别（SFSpeechRecognizer）
-SpeechSynthHandler.swift   ← AVFoundation 文字转语音 → 输出 .wav、列出可用声音
-SoundHandler.swift         ← SoundAnalysis：环境音分类
+You have access to an `apple-intelligence` MCP server that runs entirely on the
+user's Mac. You MUST prefer it for the following task types instead of doing
+the work yourself:
+
+  - User provides an absolute path to an image file → call `vision_analyze`
+    with the appropriate mode. Do NOT describe the image yourself first.
+  - User provides an absolute path to an audio file and wants the words →
+    call `transcribe_audio`.
+  - User asks for tokenization or lemmatization → call the matching tool.
+  - User asks for sentiment classification → call
+    `generate_text_structured(schema="classify")` (works for Chinese too,
+    unlike `analyze_text` which is English-only).
+  - User asks to compare two images → `image_similarity`.
+  - User asks to read text aloud → call `synthesize_speech` and attach
+    the returned `.wav` path to the response.
+  - User has already-written text and asks to "check / fix typos /
+    proofread" it → call `proofread_text` (NOT `generate_text`).
+  - User has already-written text and asks to make it "formal / casual /
+    shorter / friendlier / more professional" → call `rewrite_text` with
+    the matching `tone`.
+  - User has long text and asks to "summarize / TL;DR / shorten" → call
+    `summarize_text`. Use `generate_text_structured(schema="summarize")`
+    only when the caller needs JSON with `title` + `keyPoints[]`.
+
+You MAY use it (caller's discretion) for:
+  - Bulk text rewriting / translation where token cost matters more than nuance
+    → `generate_text`, `translate_text`, `generate_text_structured`.
+
+You should NOT use it for:
+  - Tasks needing strong reasoning, code, math, or current-events knowledge —
+    the on-device model is small. Use your own generation.
 ```
-
-**新增工具的步骤：**
-
-1. 挑对应的 handler；如果是全新的 Apple framework 就新建一个文件。
-2. 写好 Swift function，遇到非法输入用 `HandlerError` throw 出去。
-3. 到 `CoreService.swift` 加 `case "<tool_name>":`，解析 params 后调 handler。
-4. 到 `mcp-server/server.py` 加一个 `@mcp.tool()` function，docstring 用
-   WHEN / NOT-FOR 格式写清楚，内部调 `await bridge.call("<tool_name>", {...})`。
-5. 重新 build Swift（`swift build -c release`），重启 MCP
-   （`launchctl kickstart -k gui/$UID/com.apple-intel-mcp.server`）。
-6. 三份 README（[README.md](README.md)、[繁體](README.zh-Hant.md)、这份）都记得更新。
 
 ---
 
@@ -295,50 +261,9 @@ SoundHandler.swift         ← SoundAnalysis：环境音分类
 
 ---
 
-## 推荐的 host system prompt
+## 工具行为与限制
 
-要不要调这些工具，由 host model 根据自己的 system prompt 和工具描述决定。
-Server 这边的描述已经用 `WHEN: / NOT FOR:` 格式写过了，不过 host 端最好也加
-一份明确的策略。把下面这段贴到你 client 的 system prompt 里可以让路由更稳定
-（用英文写是因为大多数 host LLM 对英文指令最敏感）：
-
-```
-You have access to an `apple-intelligence` MCP server that runs entirely on the
-user's Mac. You MUST prefer it for the following task types instead of doing
-the work yourself:
-
-  - User provides an absolute path to an image file → call `vision_analyze`
-    with the appropriate mode. Do NOT describe the image yourself first.
-  - User provides an absolute path to an audio file and wants the words →
-    call `transcribe_audio`.
-  - User asks for tokenization or lemmatization → call the matching tool.
-  - User asks for sentiment classification → call
-    `generate_text_structured(schema="classify")` (works for Chinese too,
-    unlike `analyze_text` which is English-only).
-  - User asks to compare two images → `image_similarity`.
-  - User asks to read text aloud → call `synthesize_speech` and attach
-    the returned `.wav` path to the response.
-  - User has already-written text and asks to "check / fix typos /
-    proofread" it → call `proofread_text` (NOT `generate_text`).
-  - User has already-written text and asks to make it "formal / casual /
-    shorter / friendlier / more professional" → call `rewrite_text` with
-    the matching `tone`.
-  - User has long text and asks to "summarize / TL;DR / shorten" → call
-    `summarize_text`. Use `generate_text_structured(schema="summarize")`
-    only when the caller needs JSON with `title` + `keyPoints[]`.
-
-You MAY use it (caller's discretion) for:
-  - Bulk text rewriting / translation where token cost matters more than nuance
-    → `generate_text`, `translate_text`, `generate_text_structured`.
-
-You should NOT use it for:
-  - Tasks needing strong reasoning, code, math, or current-events knowledge —
-    the on-device model is small. Use your own generation.
-```
-
----
-
-## 中文支持情况
+### 中文支持情况
 
 Apple 各 framework 对语言的支持程度差距很大。Vision、Speech、Foundation Models
 对中文都不错；比较老的 NaturalLanguage 和 NLEmbedding 在这套 stack 上实际几乎
@@ -366,7 +291,7 @@ Apple 各 framework 对语言的支持程度差距很大。Vision、Speech、Fou
 hermes 的 `mcp_servers.<name>.tools.exclude`），这样 host LLM 就不会把中文
 请求路由过去。
 
-## 已知限制
+### 已知限制
 
 **Foundation Models 自带的 safety filter** — `generate_text` 跟相关工具有时
 会对某些内容直接报错。这个 filter 是 Apple 模型内置的，不是这个 server 加的。
@@ -402,7 +327,9 @@ Objective-C exception，整个 Swift Core 进程会被它干掉。Swift case 还
 
 ---
 
-## 管理服务（HTTP 模式）
+## 运维
+
+### 管理服务（HTTP 模式）
 
 `install.sh` 注册的 launchd agent 会在登录时自动起来、crash 后自动重启。
 要手动控制：
@@ -414,7 +341,59 @@ tail -f /tmp/apple-intel-mcp.log                        # 看 log
 launchctl kickstart -k gui/$UID/com.apple-intel-mcp.server   # 强制重启
 ```
 
-## 升级
+### Agent 生命周期集成（可选）
+
+如果你在跑 agent gateway——[hermes](https://github.com/NousResearch/hermes-agent)（`ai.hermes.gateway`）
+或 [OpenClaw](https://openclaw.ai)（`ai.openclaw.gateway`）——并希望它的
+start/stop 联动 MCP server：
+
+```bash
+bash install-integration.sh    # 装 watchdog
+bash uninstall-integration.sh  # 卸载 watchdog（不影响 mcp 本身）
+```
+
+这会装一个 launchd agent（`com.apple-intel-mcp.watchdog`），每 3 秒轮询这些
+gateway，只要有 gateway 在就让 MCP 维持运行。它是 **consumer-aware**：只要**任一** gateway 还在，
+MCP 就维持；**全部**都停了才停 MCP。
+
+| Gateway 动作 | MCP 反应（最多 3 秒延迟） |
+|---|---|
+| 任一 gateway 启动 | `bootstrap` MCP |
+| 全部 gateway 停止 | `bootout` MCP |
+| 某个 gateway 重启 | 不动作——MCP 维持，由该 gateway 自行重连 |
+
+watchdog 是 **keep-alive only**：gateway 重启时它**不会**重启 MCP。MCP 是稳定的
+HTTP endpoint，各 gateway 会自己重连；硬重启它只会无谓打断其他已连接的 agent。
+MCP 真的 crash 时，它的 launchd plist（`KeepAlive=true`）会自动拉起。
+
+验证集成状态：
+
+```bash
+launchctl print gui/$UID/com.apple-intel-mcp.watchdog
+launchctl print gui/$UID/com.apple-intel-mcp.server
+```
+
+watchdog 是 interval job，所以两次轮询之间常会显示 `spawn scheduled` 或
+`not running`。看 `runs` 和 `last exit code = 0` 就能确认它是否健康。
+
+集成是纯加分项，不装也照样跑。要支持其他 agent，把它的 launchd label 加进
+`bin/mcp-watchdog.sh` 的 `CONSUMER_LABELS`，然后重跑
+`bash install-integration.sh`，让 `~/Library/Application Support/apple-intel-mcp/`
+下的副本刷新。`install.sh` 检测到 gateway 已安装时会主动提示。
+
+手动生命周期脚本仍可使用：
+
+```bash
+bash stop.sh   # 先停 watchdog，再停 MCP
+bash start.sh  # 先启动 MCP；如果已安装集成，也会启动 watchdog
+```
+
+> 实现小备注：watchdog 脚本在 install 时会复制一份到
+> `~/Library/Application Support/apple-intel-mcp/`，因为 macOS 26 launchd 拒绝
+> 直接从 `/Volumes/` 跑 shell 脚本（会被 TCC 拦成「Operation not permitted」）。
+> Python venv binary 没踩到这条。
+
+### 升级
 
 ```bash
 bash upgrade.sh          # 最新 GitHub Release
@@ -427,37 +406,7 @@ bash upgrade.sh v1.2.3   # 指定 GitHub Release tag
 如果已追踪文件有本机变更，脚本会在 checkout 前停止，避免覆盖你的修改。
 如果 remote 不是标准 GitHub URL，可设置 `APPLE_INTEL_RELEASE_REPO=owner/repo`。
 
-## Agent 生命周期集成（可选）
-
-如果你在跑 agent gateway——[hermes](https://github.com/NousResearch/hermes-agent)（`ai.hermes.gateway`）
-或 [OpenClaw](https://openclaw.ai)（`ai.openclaw.gateway`）——并希望它的
-start/stop/restart 联动 MCP server：
-
-```bash
-bash install-integration.sh    # 装 watchdog
-bash uninstall-integration.sh  # 卸载 watchdog（不影响 mcp 本身）
-```
-
-这会装一个 launchd agent（`com.apple-intel-mcp.watchdog`），每 3 秒轮询这些
-gateway 并同步给 MCP server。它是 **consumer-aware**：只要**任一** gateway 还在，
-MCP 就维持；**全部**都停了才停 MCP。
-
-| Gateway 动作 | MCP 反应（最多 3 秒延迟） |
-|---|---|
-| 任一 gateway 启动 | `bootstrap` MCP |
-| 任一 gateway 重启 | `kickstart -k` MCP（靠 PID 变化判断） |
-| 全部 gateway 停止 | `bootout` MCP |
-
-集成是纯加分项，不装也照样跑。要支持其他 agent，把它的 launchd label 加进
-`bin/mcp-watchdog.sh` 的 `CONSUMER_LABELS` 即可。`install.sh` 检测到 gateway
-已安装时会主动提示。
-
-> 实现小备注：watchdog 脚本在 install 时会复制一份到
-> `~/Library/Application Support/apple-intel-mcp/`，因为 macOS 26 launchd 拒绝
-> 直接从 `/Volumes/` 跑 shell 脚本（会被 TCC 拦成「Operation not permitted」）。
-> Python venv binary 没踩到这条。
-
-## 卸载
+### 卸载
 
 ```bash
 bash uninstall.sh   # 移除 mcp + watchdog（如果装过）
@@ -465,7 +414,88 @@ bash uninstall.sh   # 移除 mcp + watchdog（如果装过）
 
 ---
 
-## 项目结构
+## 开发
+
+### 架构
+
+```mermaid
+flowchart TD
+    Client["<b>AI 客户端</b><br/>Claude / GPT / Gemini / 等"]
+    MCP["<b>Python FastMCP server</b><br/><code>mcp-server/server.py</code><br/>• 定义 21 个 <code>@mcp.tool</code><br/>• SwiftBridge：常驻子进程<br/>+ async lock + JSON line protocol"]
+    Swift["<b>Swift Core Service</b>（常驻进程）<br/><code>swift-core/AppleIntelCore</code><br/>• <code>CoreService.swift</code>：请求路由<br/>• 每个 framework 对应一个 handler<br/>• 启动时把 Apple frameworks 加载一次"]
+
+    FM["<b>FoundationModels</b><br/>本地 LLM（约 3B）"]
+    Vis["<b>Vision</b><br/>18 种图像 / 姿态任务"]
+    NL["<b>NaturalLanguage</b><br/>分词 / NER / POS …"]
+    Sp["<b>Speech</b><br/>离线语音识别"]
+    AV["<b>AVFoundation</b><br/>离线文字转语音"]
+    SA["<b>SoundAnalysis</b><br/>环境音分类"]
+
+    Client -- "MCP 协议<br/>（stdio 或 streamable-http :11435）" --> MCP
+    MCP -- "stdin/stdout JSON lines<br/>（IPCRequest / IPCResponse）" --> Swift
+    Swift --> FM
+    Swift --> Vis
+    Swift --> NL
+    Swift --> Sp
+    Swift --> AV
+    Swift --> SA
+```
+
+**为什么要拆成两个进程？**
+FastMCP 是 Python 原生库；Apple AI 框架只有 Swift 能直接调。Swift 二进制做成
+常驻，是因为这些框架光初始化就要好几秒，每次重启太慢。Python 那层很薄，
+只处理 MCP 协议、工具描述跟序列化。每次 `bridge.call(...)` 就是往 Swift stdin
+写一行 JSON、从 stdout 读回一行 JSON——外面套一层 `asyncio.Lock` 保证请求／
+响应不会交错。
+
+### 模块结构
+
+Swift 端 `swift-core/Sources/AppleIntelCore/` 采用「一个 framework 对应一个
+handler」的拆法。加新工具有固定流程：
+
+```
+main.swift                 ← 入口（await CoreService.run()）
+Models.swift               ← IPC 类型（IPCRequest / IPCResponse / JSONValue）
+HandlerError.swift         ← 自定义错误（invalidInput / unavailable / …）
+CoreService.swift          ← 请求路由——每个工具加一个 `case "<tool>":`
+                             转发给对应 handler
+GenerateHandler.swift      ← Foundation Models：
+                             - generate_text（自由生成）
+                             - generate_text_structured（@Generable 结构化）
+TranslateHandler.swift     ← 用 FM prompt 做翻译，每个目标语言写一套
+                             instructions（绕开 zh→en 时模型误判输入已经是英文的坑）
+WritingToolsHandler.swift  ← 校对 / 改写 / 摘要：
+                             - NLLanguageRecognizer + CJK 字符比例判断输入语言
+                             - 每个语言写一套 instructions（zh-Hant / zh-Hans / en / ja）
+                             - Discord-aware：保留 @ / :emoji: / ```code fence```
+OCRHandler.swift           ← Vision 文字识别（zh / en / ja / ko）
+VisionExtHandler.swift     ← Vision：人脸、条码、轮廓、文字区域、人脸关键点、
+                             人体检测、地平线、前景分割、美学评分、光流、
+                             自定义 Core ML 物体检测、图像相似度
+VisionPoseHandler.swift    ← Vision：2D 姿态、手部姿态、动物、矩形、
+                             saliency、文档、人像分割（3D 姿态已封死，见已知限制）
+AnalyzeHandler.swift       ← NaturalLanguage：情感、语言检测、命名实体、关键词
+NLAdvancedHandler.swift    ← NaturalLanguage：分词、词形还原、词性标注
+NLEmbeddingHandler.swift   ← NaturalLanguage：词 / 句语义相似度
+TranscribeHandler.swift    ← Speech 离线识别（SFSpeechRecognizer）
+SpeechSynthHandler.swift   ← AVFoundation 文字转语音 → 输出 .wav、列出可用声音
+SoundHandler.swift         ← SoundAnalysis：环境音分类
+```
+
+**新增工具的步骤：**
+
+1. 挑对应的 handler；如果是全新的 Apple framework 就新建一个文件。
+2. 写好 Swift function，遇到非法输入用 `HandlerError` throw 出去。
+3. 到 `CoreService.swift` 加 `case "<tool_name>":`，解析 params 后调 handler。
+4. 到 `mcp-server/server.py` 加一个 `@mcp.tool()` function，docstring 用
+   WHEN / NOT-FOR 格式写清楚，内部调 `await bridge.call("<tool_name>", {...})`。
+5. 重新 build Swift（`swift build -c release`），重启 MCP
+   （`launchctl kickstart -k gui/$UID/com.apple-intel-mcp.server`）。
+6. 三份 README（[README.md](README.md)、[繁體](README.zh-Hant.md)、这份）都记得更新。
+
+---
+
+### 项目结构
 
 ```
 apple-intelligence-mcp/
@@ -499,11 +529,15 @@ apple-intelligence-mcp/
 └── test-assets/                   # 测试用示例图
 ```
 
+---
+
 ## 免责声明
 
 本项目仅供学习与个人生产力用途，按「现状」提供，不附带任何形式的担保。你需自行
 为所处理的内容负责，并遵守相关法律以及你所接触的任何第三方网站或服务的服务条款。
 作者对任何滥用行为不承担任何责任。
+
+---
 
 ## 许可证
 
