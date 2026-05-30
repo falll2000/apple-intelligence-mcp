@@ -473,7 +473,7 @@ apple-intelligence-mcp/
 ├── bin/
 │   └── mcp-watchdog.sh            # 輪詢 hermes/openclaw gateway，連動 mcp 狀態
 ├── mcp-server/
-│   ├── server.py                  # FastMCP server + SwiftBridge（約 650 行）
+│   ├── server.py                  # FastMCP server + SwiftBridge（約 690 行）
 │   └── requirements.txt           # mcp>=1.0.0
 ├── swift-core/
 │   ├── Package.swift              # macOS 26、Swift 6

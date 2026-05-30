@@ -497,7 +497,7 @@ apple-intelligence-mcp/
 ├── bin/
 │   └── mcp-watchdog.sh            # polls hermes/openclaw gateways, syncs mcp state
 ├── mcp-server/
-│   ├── server.py                  # FastMCP server + SwiftBridge (~650 LOC)
+│   ├── server.py                  # FastMCP server + SwiftBridge (~690 LOC)
 │   └── requirements.txt           # mcp>=1.0.0
 ├── swift-core/
 │   ├── Package.swift              # macOS 26, Swift 6
