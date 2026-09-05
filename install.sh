@@ -92,28 +92,9 @@ info "Python dependencies installed"
 
 mkdir -p "$PLIST_DIR"
 
-# Swift Core Service plist
-cat > "$PLIST_SWIFT" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.apple-intel-mcp.swift-core</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>${SWIFT_BIN}</string>
-    </array>
-    <key>RunAtLoad</key>
-    <false/>
-    <key>KeepAlive</key>
-    <false/>
-    <key>StandardErrorPath</key>
-    <string>/tmp/apple-intel-swift-core.log</string>
-</dict>
-</plist>
-EOF
+# No launchd job for the Swift Core: SwiftBridge spawns it as a child of the
+# Python server and talks to it over that pipe, so a separate agent would never
+# be started. Older installs wrote one anyway; section 5 clears it out.
 
 # Python MCP Server plist
 PYTHON_VENV="$REPO_DIR/mcp-server/venv/bin/python3"
@@ -162,6 +143,13 @@ MCP_TARGET="${LAUNCHD_DOMAIN}/com.apple-intel-mcp.server"
 # Clear any previous instance (legacy load or modern bootstrap)
 launchctl bootout "$MCP_TARGET" 2>/dev/null || true
 launchctl unload "$PLIST_MCP" 2>/dev/null || true
+
+# Older installs left a com.apple-intel-mcp.swift-core agent behind. It never ran
+# (RunAtLoad and KeepAlive were both false) but launchd still registers it at every
+# login, so it lingers in `launchctl list`. Remove it.
+launchctl bootout "${LAUNCHD_DOMAIN}/com.apple-intel-mcp.swift-core" 2>/dev/null || true
+launchctl unload "$PLIST_SWIFT" 2>/dev/null || true
+rm -f "$PLIST_SWIFT"
 
 launchctl bootstrap "$LAUNCHD_DOMAIN" "$PLIST_MCP"
 info "MCP Server started (port 11435)"

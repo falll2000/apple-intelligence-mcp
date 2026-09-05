@@ -14,13 +14,16 @@ Swift Core: stdin/stdout JSON IPC (long-running subprocess)
 import asyncio
 import json
 import os
+import secrets
 import subprocess
 import sys
 import uuid
 import logging
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
+from mcp.types import ToolAnnotations
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,6 +35,14 @@ log = logging.getLogger("apple-intel-mcp")
 
 SCRIPT_DIR = Path(__file__).parent.parent
 SWIFT_BIN = SCRIPT_DIR / "swift-core" / ".build" / "release" / "AppleIntelCore"
+
+# Upper bound for one Swift Core round-trip. Without it, a handler whose framework
+# callback never fires would hold the bridge lock forever and wedge every later call.
+CALL_TIMEOUT_SECONDS = float(os.environ.get("APPLE_INTEL_CALL_TIMEOUT", "300"))
+
+# Optional shared secret for the HTTP transport. Unset (the default) the server
+# behaves exactly as before and accepts any local caller.
+API_KEY = os.environ.get("APPLE_INTEL_API_KEY", "")
 
 
 class SwiftBridge:
@@ -60,9 +71,26 @@ class SwiftBridge:
             ready_line = self._proc.stdout.readline()
             log.info(f"Swift Core response: {ready_line.strip()}")
 
+    def _exchange(self, line: str) -> str:
+        """One blocking request/response round-trip.
+
+        Runs in a worker thread so asyncio.wait_for can actually interrupt it and so
+        pipe I/O does not stall the event loop for the duration of a Swift call.
+        """
+        self._ensure_started()
+        self._proc.stdin.write(line)
+        self._proc.stdin.flush()
+        return self._proc.stdout.readline()
+
+    def _discard(self):
+        """Kill and reap a broken Swift Core so it cannot linger as an orphan."""
+        proc, self._proc = self._proc, None
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
     async def call(self, tool: str, params: dict) -> dict:
         async with self._lock:
-            self._ensure_started()
             request = {
                 "id": str(uuid.uuid4()),
                 "tool": tool,
@@ -70,15 +98,23 @@ class SwiftBridge:
             }
             line = json.dumps(request, ensure_ascii=False) + "\n"
             try:
-                self._proc.stdin.write(line)
-                self._proc.stdin.flush()
-                response_line = self._proc.stdout.readline()
+                response_line = await asyncio.wait_for(
+                    asyncio.to_thread(self._exchange, line),
+                    timeout=CALL_TIMEOUT_SECONDS,
+                )
                 if not response_line:
                     raise RuntimeError("Swift Core did not respond (process may have exited)")
                 return json.loads(response_line)
+            except asyncio.TimeoutError:
+                # Killing the process unblocks the worker thread still sitting in readline.
+                self._discard()
+                raise ToolError(
+                    f"Swift Core timed out after {CALL_TIMEOUT_SECONDS:.0f}s on '{tool}'. "
+                    "It was restarted; retry the call."
+                ) from None
             except Exception as e:
-                self._proc = None
-                raise RuntimeError(f"Swift Core communication failed: {e}")
+                self._discard()
+                raise ToolError(f"Swift Core communication failed: {e}")
 
     def shutdown(self):
         if self._proc and self._proc.poll() is None:
@@ -88,7 +124,7 @@ class SwiftBridge:
 
 def _unwrap(result: dict, key: str | None = None):
     if not result.get("success"):
-        raise RuntimeError(result.get("error", "Unknown error"))
+        raise ToolError(result.get("error", "Unknown error"))
     payload = result["result"]
     if key is not None:
         return payload[key]
@@ -97,7 +133,7 @@ def _unwrap(result: dict, key: str | None = None):
 
 bridge = SwiftBridge()
 
-mcp = FastMCP(
+mcp = MCPServer(
     "Apple Intelligence",
     instructions=(
         "Local on-device AI tools running entirely on Apple Silicon. "
@@ -134,6 +170,16 @@ mcp = FastMCP(
 )
 
 
+# Tool annotations. Every tool here reads local files or runs a local model;
+# only synthesize_speech writes to disk. Clients that gate tool calls on
+# readOnlyHint treat a missing annotation as write-capable, so declare it.
+# destructiveHint is spelled out for the writing tool rather than left unset:
+# synthesize_speech removes whatever sits at output_path before writing, and
+# hosts that read the full annotation set decide on that flag first.
+_READ_ONLY = ToolAnnotations(readOnlyHint=True)
+_WRITES_FILE = ToolAnnotations(readOnlyHint=False, destructiveHint=True)
+
+
 # ─────────────────────────────────────────────────────────────
 # Vision — single-image router
 # ─────────────────────────────────────────────────────────────
@@ -167,7 +213,7 @@ _VISION_MODES: dict[str, str] = {
 }
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def vision_analyze(
     image_path: str,
     mode: str,
@@ -210,7 +256,7 @@ async def vision_analyze(
     """
     swift_tool = _VISION_MODES.get(mode)
     if swift_tool is None:
-        raise RuntimeError(
+        raise ToolError(
             f"Unknown mode: {mode!r}. Available modes: {', '.join(sorted(_VISION_MODES))}"
         )
     params: dict = {"image_path": image_path}
@@ -223,7 +269,7 @@ async def vision_analyze(
 # Vision — multi-input / specialized (kept separate, different signatures)
 # ─────────────────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def image_similarity(
     image_path_1: str,
     image_path_2: str,
@@ -240,7 +286,7 @@ async def image_similarity(
     }))
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def detect_optical_flow(
     reference_path: str,
     target_path: str,
@@ -258,7 +304,7 @@ async def detect_optical_flow(
     }))
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def detect_trajectories(video_path: str) -> dict:
     """
     Detect parabolic trajectories (sports balls, projectiles) in a local video.
@@ -269,7 +315,7 @@ async def detect_trajectories(video_path: str) -> dict:
     return _unwrap(await bridge.call("detect_trajectories", {"video_path": video_path}))
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def detect_objects(
     image_path: str,
     model_path: str,
@@ -291,7 +337,7 @@ async def detect_objects(
 # Foundation Models — on-device LLM
 # ─────────────────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def generate_text(prompt: str, system_prompt: str = "") -> str:
     """
     Generate / rewrite / summarize text on the local Apple LLM.
@@ -313,7 +359,7 @@ async def generate_text(prompt: str, system_prompt: str = "") -> str:
     return _unwrap(await bridge.call("generate_text", params), key="text")
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def generate_text_structured(
     prompt: str,
     schema: str = "summarize",
@@ -377,7 +423,7 @@ async def generate_text_structured(
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def translate_text(text: str, to: str = "zh-Hant", from_lang: str = "auto") -> str:
     """
     Translate text using the on-device LLM.
@@ -404,7 +450,7 @@ async def translate_text(text: str, to: str = "zh-Hant", from_lang: str = "auto"
 # not generate from scratch. Discord-aware (preserves @mentions, :emoji:, code blocks).
 # ─────────────────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def proofread_text(text: str) -> str:
     """
     Fix typos, grammar, and punctuation in user-supplied text. Preserves tone, style,
@@ -424,7 +470,7 @@ async def proofread_text(text: str) -> str:
     return _unwrap(await bridge.call("proofread_text", {"text": text}), key="text")
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def rewrite_text(text: str, tone: str = "concise") -> str:
     """
     Rewrite user-supplied text in a different tone while preserving meaning,
@@ -449,7 +495,7 @@ async def rewrite_text(text: str, tone: str = "concise") -> str:
     }), key="text")
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def summarize_text(text: str, length: str = "medium") -> str:
     """
     Condense user-supplied text while preserving key info and language.
@@ -478,7 +524,7 @@ async def summarize_text(text: str, length: str = "medium") -> str:
 # Natural Language
 # ─────────────────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def analyze_text(text: str) -> dict:
     """
     Sentiment + language detection + NER (person/place/org) + keywords.
@@ -491,7 +537,7 @@ async def analyze_text(text: str) -> dict:
     return _unwrap(await bridge.call("analyze_text", {"text": text}))
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def tokenize_text(text: str, unit: str = "word") -> dict:
     """
     Split text into words, sentences, or paragraphs (multilingual).
@@ -506,7 +552,7 @@ async def tokenize_text(text: str, unit: str = "word") -> dict:
     return _unwrap(await bridge.call("tokenize_text", {"text": text, "unit": unit}))
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def tag_parts_of_speech(text: str) -> dict:
     """
     POS tagging (noun, verb, adjective, ...).
@@ -517,7 +563,7 @@ async def tag_parts_of_speech(text: str) -> dict:
     return _unwrap(await bridge.call("tag_parts_of_speech", {"text": text}))
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def lemmatize_text(text: str) -> dict:
     """
     Lemmatize each word to its base form (running→run, mice→mouse).
@@ -528,7 +574,7 @@ async def lemmatize_text(text: str) -> dict:
     return _unwrap(await bridge.call("lemmatize_text", {"text": text}))
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def word_similarity(
     word1: str,
     word2: str,
@@ -545,7 +591,7 @@ async def word_similarity(
     }))
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def sentence_similarity(
     sentence1: str,
     sentence2: str,
@@ -567,7 +613,7 @@ async def sentence_similarity(
 # Speech & Sound
 # ─────────────────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def transcribe_audio(audio_path: str, language: str = "zh-TW") -> str:
     """
     Offline speech-to-text on a local audio file.
@@ -585,7 +631,7 @@ async def transcribe_audio(audio_path: str, language: str = "zh-TW") -> str:
     }), key="text")
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def classify_sound(audio_path: str) -> dict:
     """
     Classify what kind of sound is in the audio (music, speech, laughter, dog bark, ...).
@@ -596,7 +642,7 @@ async def classify_sound(audio_path: str) -> dict:
     return _unwrap(await bridge.call("classify_sound", {"audio_path": audio_path}))
 
 
-@mcp.tool()
+@mcp.tool(annotations=_WRITES_FILE)
 async def synthesize_speech(
     text: str,
     voice: str = "",
@@ -635,7 +681,7 @@ async def synthesize_speech(
     return _unwrap(await bridge.call("synthesize_speech", params))
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def list_voices(language: str = "") -> dict:
     """
     List available macOS speech synthesis voices (helper for `synthesize_speech`).
@@ -669,6 +715,57 @@ except ImportError:
     pass
 
 
+def _bearer_guard(app, expected: str):
+    """Reject HTTP requests that do not carry the shared secret.
+
+    The server binds to loopback and the SDK's DNS-rebinding protection is on, so
+    a web page cannot reach it. What loopback does not separate is local accounts:
+    on a shared Mac any other user can call these tools, which read files as
+    whoever runs the server and, via synthesize_speech, write them too. Setting
+    APPLE_INTEL_API_KEY closes that gap. stdio needs none of this — it is a private
+    pipe to the parent process.
+    """
+    challenge = f"Bearer {expected}".encode("latin-1")
+
+    async def wrapped(scope, receive, send):
+        if scope["type"] == "http":
+            offered = dict(scope.get("headers") or []).get(b"authorization", b"")
+            if not secrets.compare_digest(offered, challenge):
+                body = b'{"error":"unauthorized"}'
+                await send({
+                    "type": "http.response.start",
+                    "status": 401,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"content-length", str(len(body)).encode()),
+                        (b"www-authenticate", b"Bearer"),
+                    ],
+                })
+                await send({"type": "http.response.body", "body": body})
+                return
+        await app(scope, receive, send)
+
+    return wrapped
+
+
+def _run_http(port: int):
+    """Serve streamable HTTP, wrapping the app in the bearer guard when a key is set."""
+    if not API_KEY:
+        mcp.run(transport="streamable-http", host="127.0.0.1", port=port)
+        return
+
+    import uvicorn
+
+    log.info("APPLE_INTEL_API_KEY is set; requiring Authorization: Bearer on /mcp")
+    app = mcp.streamable_http_app(host="127.0.0.1")
+    uvicorn.run(
+        _bearer_guard(app, API_KEY),
+        host="127.0.0.1",
+        port=port,
+        log_level=mcp.settings.log_level.lower(),
+    )
+
+
 # ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import atexit
@@ -679,7 +776,5 @@ if __name__ == "__main__":
         mcp.run(transport="stdio")
     else:
         port = int(os.environ.get("APPLE_INTEL_PORT", "11435"))
-        mcp.settings.port = port
-        mcp.settings.host = "127.0.0.1"
         log.info(f"Apple Intelligence MCP Server starting (port {port})...")
-        mcp.run(transport="streamable-http")
+        _run_http(port)

@@ -8,6 +8,9 @@
 DOMAIN="gui/$(id -u)"
 MCP_TARGET="${DOMAIN}/com.apple-intel-mcp.server"
 
+# Drop the manual-start pin first, so the watchdog cannot read it as "keep MCP up".
+rm -f /tmp/apple-intel-mcp.manual-start
+
 wait_unloaded() {
     local target="$1"
     local tries=20

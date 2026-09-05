@@ -7,6 +7,7 @@ PLIST_DIR="$HOME/Library/LaunchAgents"
 PLIST_MCP="$PLIST_DIR/com.apple-intel-mcp.server.plist"
 PLIST_WATCHDOG="$PLIST_DIR/com.apple-intel-mcp.watchdog.plist"
 PLIST_LEGACY_WATCHDOG="$PLIST_DIR/com.apple-intel-mcp.hermes-watchdog.plist"
+PIN_FILE="/tmp/apple-intel-mcp.manual-start"
 DOMAIN="gui/$(id -u)"
 MCP_TARGET="${DOMAIN}/com.apple-intel-mcp.server"
 WATCHDOG_TARGET="${DOMAIN}/com.apple-intel-mcp.watchdog"
@@ -16,6 +17,11 @@ if [ ! -f "$PLIST_MCP" ]; then
     echo "❌ MCP launchd plist not found. Run ./install.sh first."
     exit 1
 fi
+
+# Tell the watchdog this start was deliberate. Without the marker it would
+# bootout MCP within 3s whenever no gateway is running; it clears the marker
+# itself as soon as a gateway shows up.
+touch "$PIN_FILE"
 
 if ! launchctl print "$MCP_TARGET" >/dev/null 2>&1; then
     if launchctl bootstrap "$DOMAIN" "$PLIST_MCP"; then

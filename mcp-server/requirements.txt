@@ -1,1 +1,4 @@
-mcp>=1.0.0
+# mcp 2.x: FastMCP was renamed MCPServer, host/port moved from .settings onto
+# run(), and only ToolError reaches the client with its message intact.
+# server.py targets that API, so 1.x will not run it.
+mcp>=2,<3

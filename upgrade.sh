@@ -157,6 +157,16 @@ info "Python dependencies updated"
 
 # ── 5. Ensure the installed launchd service uses the new binary ─
 
+# Retire the com.apple-intel-mcp.swift-core agent older installs wrote. The Swift
+# Core is a child of the Python server, never a launchd job, so that agent never
+# ran — but launchd still registers it at every login until the file is gone.
+PLIST_SWIFT="$HOME/Library/LaunchAgents/com.apple-intel-mcp.swift-core.plist"
+if [ -f "$PLIST_SWIFT" ]; then
+    launchctl bootout "${DOMAIN}/com.apple-intel-mcp.swift-core" 2>/dev/null || true
+    rm -f "$PLIST_SWIFT"
+    info "Removed the unused Swift Core launchd agent"
+fi
+
 if launchctl print "$MCP_TARGET" >/dev/null 2>&1; then
     launchctl kickstart -k "$MCP_TARGET"
     info "MCP Server restarted"

@@ -70,7 +70,7 @@ bash install.sh
 脚本会自动做：
 
 1. 编译 Swift Core Service（`swift build -c release`）
-2. 建好 Python venv 并装 `mcp`（FastMCP）
+2. 建好 Python venv 并装 `mcp` Python SDK（2.x）
 3. 把服务（`com.apple-intel-mcp.server`）注册成 launchd agent，监听 11435 端口
 4. 打印出对应你机器路径的客户端配置，直接复制粘贴就行
 
@@ -108,7 +108,8 @@ http://127.0.0.1:11435/mcp
       "apple-intelligence": {
         "url": "http://127.0.0.1:11435/mcp",
         "transport": "streamable-http",
-        "connectionTimeoutMs": 10000
+        "connectionTimeoutMs": 10000,
+        "requestTimeoutMs": 300000
       }
     }
   }
@@ -119,9 +120,24 @@ http://127.0.0.1:11435/mcp
 
 ```bash
 openclaw mcp set apple-intelligence \
-  '{"url":"http://127.0.0.1:11435/mcp","transport":"streamable-http"}'
+  '{"url":"http://127.0.0.1:11435/mcp","transport":"streamable-http","requestTimeoutMs":300000}'
 openclaw mcp list                        # 确认已注册
+openclaw mcp probe                       # 实际连接，列出它声明了什么
 ```
+
+用 `openclaw mcp configure apple-intelligence` 做 per-server 调整（OpenClaw 2026.9+）：
+
+| CLI 旗标 | `openclaw.json` 字段 | 用途 |
+|---|---|---|
+| `--include` / `--exclude` | `toolFilter.include` / `toolFilter.exclude` | 要暴露／隐藏的工具名，支持 `*` glob |
+| `--approval auto\|prompt\|approve` | `codex.defaultToolsApprovalMode` | 工具批准模式 |
+| `--timeout` | `requestTimeoutMs` | 单次调用超时。OpenClaw 默认 **60 秒**，远低于本 server 自己的 300 秒防呆上界，请调高；否则长音频转写、视频分析会在 server 还在跑的时候就被 client 放弃 |
+| `--connect-timeout` | `connectionTimeoutMs` | 连接超时 |
+| `--parallel` | `supportsParallelToolCalls` | 不要开。OpenClaw 默认就是每台 server 串行；开了之后它会并发送出，而 Swift bridge 内部仍然串行化，排队的那几个只是在烧掉自己的超时额度 |
+
+旧的字段拼法（`timeout`、`connect_timeout`、`ssl_verify`、`client_cert`、
+`client_key`、`supports_parallel_tool_calls`、`workingDirectory`、`disabled`）在
+当前 OpenClaw 会直接判为配置错误——用 `openclaw doctor --fix` 迁移。
 
 想改用 stdio（由 OpenClaw 拉起进程），就在 server 项目里填上面 Claude Desktop 区块
 那组相同的 `command` / `args`。
@@ -133,9 +149,15 @@ hermes mcp add apple-intelligence --url http://127.0.0.1:11435/mcp
 hermes mcp test apple-intelligence    # 验证连接 + 工具列表
 ```
 
-不想暴露的工具，可在 `~/.hermes/config.yaml` 用
-`mcp_servers.apple-intelligence.tools.exclude` 排除——例如中文场景排掉那几个
-只支持英文的 NL 工具（见[中文支持情况](#中文支持情况)）。
+`~/.hermes/config.yaml` 里 `mcp_servers.apple-intelligence` 底下可用的 key：
+
+| Key | 用途 |
+|---|---|
+| `tools.exclude` / `tools.include` | 按名称隐藏或设白名单——例如中文场景排掉那几个只支持英文的 NL 工具（见[中文支持情况](#中文支持情况)） |
+| `trust: full \| untrusted` | 设 `untrusted` 时，会写入的工具每次调用都要批准。本项目每个工具都声明了 `readOnlyHint`，只有 `synthesize_speech` 例外，所以只有它会弹批准 |
+| `protocol: auto \| stateless \| legacy` | 握手世代；对本 server 用 `auto` 即可 |
+| `timeout` / `connect_timeout` / `keepalive_interval` | 秒 |
+| `lazy: true` | 首次使用时才连接，不在 gateway 启动时连 |
 
 ### 推荐的 host system prompt
 
@@ -184,6 +206,10 @@ You should NOT use it for:
 
 18 种单张图片的 Vision 任务被收进一个 `vision_analyze`（用 `mode` 参数路由），
 没拆成 18 个独立工具——实测下来这样做能明显提升 host LLM 选工具的准确度。
+
+每个工具都声明了 MCP 的 `readOnlyHint` annotation，只有 `synthesize_speech` 会写文件。
+会依 annotation 决定是否拦截调用的 host（OpenClaw 的批准模式、hermes 的 trust 分级）
+需要这个信息，否则会把每个工具都当成有写入风险。
 
 ### Foundation Models — 本地 LLM
 
@@ -284,7 +310,7 @@ Apple 各 framework 对语言的支持程度差距很大。Vision、Speech、Fou
 | `generate_text` | ⚠ 短 prompt OK；知识截止约 2023 |
 | `classify_sound` | ⚠ 跟语言无关，但排序偶尔不准 |
 | `analyze_text` | ✗ 中文情感永远是 0 / 中性，命名实体几乎抓不到 |
-| `tag_parts_of_speech` | ✗ 中文所有词性都会标成「其他」 |
+| `tag_parts_of_speech` | ✗ 中文每个词都会被标成 `other` |
 | `word_similarity` / `sentence_similarity` | ✗ 没有加载中文 embedding 模型 |
 
 主要做中文场景时，建议在 host 的 MCP 配置层直接把 ✗ 那四个排除掉（比如
@@ -301,8 +327,9 @@ hermes 的 `mcp_servers.<name>.tools.exclude`），这样 host LLM 就不会把�
 **`detect_objects`** 需要你自备 Core ML 模型（`.mlmodel` 或 `.mlmodelc`）。
 其他工具都开箱即用。
 
-**`detect_trajectories`** 需要 mp4 / mov 视频文件，对抛物线运动（球类运动）
-效果最好。
+**`detect_trajectories`** 需要 AVFoundation 打得开的容器，也就是 mp4 或 mov。
+WebM/VP9 会直接回 `Cannot Open`，请先转成 mp4。它找的是固定机位下沿抛物线运动
+的物体（球类运动），最多读 300 帧。
 
 **`body_pose_3d` 已经从公开 mode 列表里移掉了。**
 `VNDetectHumanBodyPose3DRequest` 在跑 `perform` 时会抛出 Swift 接不住的
@@ -341,6 +368,25 @@ tail -f /tmp/apple-intel-mcp.log                        # 看 log
 launchctl kickstart -k gui/$UID/com.apple-intel-mcp.server   # 强制重启
 ```
 
+环境变量（写在 launchd plist，或直接跑 `server.py` 时指定）：
+
+| 变量 | 默认 | 含义 |
+|---|---|---|
+| `APPLE_INTEL_PORT` | `11435` | HTTP 端口 |
+| `APPLE_INTEL_CALL_TIMEOUT` | `300` | 单次 Swift Core 调用的秒数上限，超过就杀掉并重启它 |
+| `APPLE_INTEL_API_KEY` | 未设置 | 设了之后 `/mcp` 就要求 `Authorization: Bearer <值>`；不设则接受任何本机调用者 |
+
+要不要设 `APPLE_INTEL_API_KEY`，取决于这台机器还有谁在用。Server 只绑 loopback，
+且 SDK 的 DNS rebinding 防护是开的，所以网页碰不到它——但 loopback 不区分本机
+账号，而这些工具是以「运行 server 的那个用户」身份读文件（`synthesize_speech`
+还会写文件）。多人共用的 Mac 就该设。Client 端用 header 带进来：hermes 放
+`mcp_servers.<name>.headers`，OpenClaw 用 `openclaw mcp configure <name> --header`。
+走 stdio 的不需要，那是私有管道。
+
+`APPLE_INTEL_CALL_TIMEOUT` 是防死锁用的上界，不是速度限制——只有在 Swift Core
+完全不回应时才会触发。hermes 自己的工具调用默认也是 300 秒，两边本来就一致；
+OpenClaw 默认 60 秒，该调的是它的 `requestTimeoutMs`，不是把这个值降下来。
+
 ### Agent 生命周期集成（可选）
 
 如果你在跑 agent gateway——[hermes](https://github.com/NousResearch/hermes-agent)（`ai.hermes.gateway`）
@@ -352,11 +398,11 @@ bash install-integration.sh    # 装 watchdog
 bash uninstall-integration.sh  # 卸载 watchdog（不影响 mcp 本身）
 ```
 
-这会装一个 launchd agent（`com.apple-intel-mcp.watchdog`），每 3 秒轮询这些
+这会装一个 launchd agent（`com.apple-intel-mcp.watchdog`），定期轮询这些
 gateway，只要有 gateway 在就让 MCP 维持运行。它是 **consumer-aware**：只要**任一** gateway 还在，
 MCP 就维持；**全部**都停了才停 MCP。
 
-| Gateway 动作 | MCP 反应（最多 3 秒延迟） |
+| Gateway 动作 | MCP 反应（延迟一个轮询周期） |
 |---|---|
 | 任一 gateway 启动 | `bootstrap` MCP |
 | 全部 gateway 停止 | `bootout` MCP |
@@ -387,6 +433,14 @@ watchdog 是 interval job，所以两次轮询之间常会显示 `spawn schedule
 bash stop.sh   # 先停 watchdog，再停 MCP
 bash start.sh  # 先启动 MCP；如果已安装集成，也会启动 watchdog
 ```
+
+`start.sh` 会在 `/tmp/apple-intel-mcp.manual-start` 放一个标记，这样即使当下没有
+任何 gateway 在跑，watchdog 也不会把你刚叫起来的 server 收掉。之后第一次轮询
+看到 gateway 就会清掉标记，把 MCP 交还给 gateway 驱动的生命周期；`stop.sh` 和
+重启也会清掉它。
+
+> plist 里写的是 `StartInterval` 3，但 launchd 对重复性任务有十秒下限，实际上
+> 大约每 10 秒才轮询一次。不要按 3 秒去估算反应时间。
 
 > 实现小备注：watchdog 脚本在 install 时会复制一份到
 > `~/Library/Application Support/apple-intel-mcp/`，因为 macOS 26 launchd 拒绝
@@ -421,7 +475,7 @@ bash uninstall.sh   # 移除 mcp + watchdog（如果装过）
 ```mermaid
 flowchart TD
     Client["<b>AI 客户端</b><br/>Claude / GPT / Gemini / 等"]
-    MCP["<b>Python FastMCP server</b><br/><code>mcp-server/server.py</code><br/>• 定义 21 个 <code>@mcp.tool</code><br/>• SwiftBridge：常驻子进程<br/>+ async lock + JSON line protocol"]
+    MCP["<b>Python MCP server（mcp SDK 2.x）</b><br/><code>mcp-server/server.py</code><br/>• 定义 21 个 <code>@mcp.tool</code><br/>• SwiftBridge：常驻子进程<br/>+ async lock + JSON line protocol"]
     Swift["<b>Swift Core Service</b>（常驻进程）<br/><code>swift-core/AppleIntelCore</code><br/>• <code>CoreService.swift</code>：请求路由<br/>• 每个 framework 对应一个 handler<br/>• 启动时把 Apple frameworks 加载一次"]
 
     FM["<b>FoundationModels</b><br/>本地 LLM（约 3B）"]
@@ -442,7 +496,7 @@ flowchart TD
 ```
 
 **为什么要拆成两个进程？**
-FastMCP 是 Python 原生库；Apple AI 框架只有 Swift 能直接调。Swift 二进制做成
+MCP Python SDK 是 Python 原生库；Apple AI 框架只有 Swift 能直接调。Swift 二进制做成
 常驻，是因为这些框架光初始化就要好几秒，每次重启太慢。Python 那层很薄，
 只处理 MCP 协议、工具描述跟序列化。每次 `bridge.call(...)` 就是往 Swift stdin
 写一行 JSON、从 stdout 读回一行 JSON——外面套一层 `asyncio.Lock` 保证请求／
@@ -505,11 +559,11 @@ apple-intelligence-mcp/
 ├── bin/
 │   └── mcp-watchdog.sh            # 轮询 hermes/openclaw gateway，联动 mcp 状态
 ├── mcp-server/
-│   ├── server.py                  # FastMCP server + SwiftBridge（约 690 行）
-│   └── requirements.txt           # mcp>=1.0.0
+│   ├── server.py                  # MCPServer + SwiftBridge（约 780 行）
+│   └── requirements.txt           # mcp>=2,<3
 ├── swift-core/
 │   ├── Package.swift              # macOS 26、Swift 6
-│   └── Sources/AppleIntelCore/    # 约 2,500 行，一个 framework 一个 handler
+│   └── Sources/AppleIntelCore/    # 约 2,650 行，一个 framework 一个 handler
 │       ├── main.swift             # 入口
 │       ├── CoreService.swift      # 请求路由
 │       ├── Models.swift           # IPC 类型

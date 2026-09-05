@@ -72,7 +72,7 @@ bash install.sh
 
 The script will:
 1. Compile the Swift Core Service (release build, `swift build -c release`)
-2. Create a Python venv and install `mcp` (FastMCP)
+2. Create a Python venv and install the `mcp` Python SDK (2.x)
 3. Register the server as a launchd agent (`com.apple-intel-mcp.server`) on port 11435
 4. Print the exact config snippet for your AI client
 
@@ -110,7 +110,8 @@ let OpenClaw spawn the process):
       "apple-intelligence": {
         "url": "http://127.0.0.1:11435/mcp",
         "transport": "streamable-http",
-        "connectionTimeoutMs": 10000
+        "connectionTimeoutMs": 10000,
+        "requestTimeoutMs": 300000
       }
     }
   }
@@ -121,9 +122,24 @@ Or register it from the CLI without editing the file:
 
 ```bash
 openclaw mcp set apple-intelligence \
-  '{"url":"http://127.0.0.1:11435/mcp","transport":"streamable-http"}'
+  '{"url":"http://127.0.0.1:11435/mcp","transport":"streamable-http","requestTimeoutMs":300000}'
 openclaw mcp list                        # verify it registered
+openclaw mcp probe                       # connect and list what it advertises
 ```
+
+Per-server tuning with `openclaw mcp configure apple-intelligence` (OpenClaw 2026.9+):
+
+| CLI flag | `openclaw.json` key | Use |
+|---|---|---|
+| `--include` / `--exclude` | `toolFilter.include` / `toolFilter.exclude` | Tool names or `*` globs to expose / hide |
+| `--approval auto\|prompt\|approve` | `codex.defaultToolsApprovalMode` | Tool-approval posture |
+| `--timeout` | `requestTimeoutMs` | Per-call timeout. OpenClaw defaults to **60 s** — well under this server's own 300 s guard — so raise it, or long transcriptions and video jobs get abandoned client-side while the server is still working |
+| `--connect-timeout` | `connectionTimeoutMs` | Connection timeout |
+| `--parallel` | `supportsParallelToolCalls` | Leave it off. OpenClaw is sequential per server by default; turning it on fires concurrent calls that the Swift bridge serializes anyway, so the queued ones spend their own timeout budget waiting |
+
+Older key spellings (`timeout`, `connect_timeout`, `ssl_verify`, `client_cert`,
+`client_key`, `supports_parallel_tool_calls`, `workingDirectory`, `disabled`) are
+rejected outright by current OpenClaw — run `openclaw doctor --fix` to migrate.
 
 For a stdio setup instead (OpenClaw spawns the process), use the same
 `command` / `args` as the Claude Desktop block above under the server entry.
@@ -135,9 +151,15 @@ hermes mcp add apple-intelligence --url http://127.0.0.1:11435/mcp
 hermes mcp test apple-intelligence    # verify connection + tool list
 ```
 
-Hide tools you don't want exposed via `mcp_servers.apple-intelligence.tools.exclude`
-in `~/.hermes/config.yaml` — e.g. the English-only NL tools for Chinese-heavy use
-(see [Language coverage](#language-coverage)).
+Per-server keys under `mcp_servers.apple-intelligence` in `~/.hermes/config.yaml`:
+
+| Key | Use |
+|---|---|
+| `tools.exclude` / `tools.include` | Hide or whitelist tools by name — e.g. exclude the English-only NL tools for Chinese-heavy use (see [Language coverage](#language-coverage)) |
+| `trust: full \| untrusted` | On `untrusted`, write-capable tools need approval per call. Every tool here declares `readOnlyHint` except `synthesize_speech`, so only that one prompts |
+| `protocol: auto \| stateless \| legacy` | Handshake era; `auto` is correct for this server |
+| `timeout` / `connect_timeout` / `keepalive_interval` | Seconds |
+| `lazy: true` | Connect on first use instead of at gateway startup |
 
 ### Recommended host system prompt
 
@@ -187,6 +209,10 @@ You should NOT use it for:
 The 18 single-image Vision capabilities are routed through one tool
 (`vision_analyze`) with a `mode` parameter, instead of 18 individual tools —
 this measurably improves host-LLM tool-selection accuracy.
+
+Every tool declares an MCP `readOnlyHint` annotation; `synthesize_speech` is the
+only one that writes to disk. Hosts that gate calls on annotations — OpenClaw's
+approval posture, hermes' trust tiers — depend on this being present.
 
 ### Foundation Models — on-device LLM
 
@@ -289,7 +315,7 @@ NLEmbedding frameworks are essentially English-only on this stack.
 | `generate_text` | ⚠ short prompts OK; knowledge cutoff ~2023 |
 | `classify_sound` | ⚠ language-agnostic but ranking can be off |
 | `analyze_text` | ✗ Chinese sentiment always 0/中性, NER misses Chinese entities |
-| `tag_parts_of_speech` | ✗ Chinese tags all return as 「其他」 |
+| `tag_parts_of_speech` | ✗ every Chinese token comes back tagged `other` |
 | `word_similarity` / `sentence_similarity` | ✗ no Chinese embedding model |
 
 For Chinese-heavy deployments, exclude the four ✗ tools at the host's MCP
@@ -307,8 +333,10 @@ might trigger it.
 **`detect_objects`** requires a user-supplied Core ML model (`.mlmodel` or
 `.mlmodelc`). All other tools work out of the box.
 
-**`detect_trajectories`** requires a video file (mp4/mov). Works best with
-footage of objects following a parabolic path (sports, balls).
+**`detect_trajectories`** needs a container AVFoundation can open — mp4 or mov.
+WebM/VP9 fails with `Cannot Open`, so remux those to mp4 first. It looks for
+objects following a parabolic path (sports, balls) against a stationary camera,
+and reads at most 300 frames.
 
 **`body_pose_3d` is removed from the public mode list.**
 `VNDetectHumanBodyPose3DRequest` terminates the Swift Core process with an
@@ -348,6 +376,28 @@ tail -f /tmp/apple-intel-mcp.log                        # logs
 launchctl kickstart -k gui/$UID/com.apple-intel-mcp.server   # force restart
 ```
 
+Environment variables (set them in the launchd plist, or when running `server.py`
+directly):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `APPLE_INTEL_PORT` | `11435` | HTTP port |
+| `APPLE_INTEL_CALL_TIMEOUT` | `300` | Seconds one Swift Core call may take before the bridge kills and restarts it |
+| `APPLE_INTEL_API_KEY` | unset | When set, `/mcp` requires `Authorization: Bearer <value>`. Unset, any local caller is accepted |
+
+Whether you need `APPLE_INTEL_API_KEY` depends on who else uses the machine. The
+server binds to loopback and the SDK's DNS-rebinding protection is on, so a web
+page cannot reach it — but loopback does not separate local accounts, and these
+tools read files as whoever runs the server (and write them, via
+`synthesize_speech`). On a shared Mac, set it. Clients pass it as a header:
+hermes `mcp_servers.<name>.headers`, OpenClaw `openclaw mcp configure <name>
+--header`. stdio callers need nothing — that transport is a private pipe.
+
+`APPLE_INTEL_CALL_TIMEOUT` is a hang guard, not a speed limit — it only fires when
+the Swift Core stops answering at all. hermes ships a matching 300 s tool-call
+default, so the two already agree; OpenClaw defaults to 60 s, so raise
+`requestTimeoutMs` on that side rather than lowering this one.
+
 ### Agent lifecycle integration (optional)
 
 If you run an agent gateway — [hermes](https://github.com/NousResearch/hermes-agent) (`ai.hermes.gateway`)
@@ -360,11 +410,11 @@ bash uninstall-integration.sh  # remove watchdog (keeps mcp running)
 ```
 
 This installs one launchd agent (`com.apple-intel-mcp.watchdog`) that polls
-every 3 s and keeps the MCP server alive while any gateway is up. It is
+on a short interval and keeps the MCP server alive while any gateway is up. It is
 **consumer-aware**: MCP stays up while **any** gateway is loaded and only stops
 once **all** are gone.
 
-| Gateway action | MCP reaction (≤ 3 s lag) |
+| Gateway action | MCP reaction (one poll of lag) |
 |---|---|
 | any gateway starts | `bootstrap` MCP |
 | all gateways stopped | `bootout` MCP |
@@ -398,6 +448,15 @@ Manual lifecycle scripts still work:
 bash stop.sh   # stops the watchdog first, then MCP
 bash start.sh  # starts MCP, then the watchdog if the integration is installed
 ```
+
+`start.sh` drops a marker at `/tmp/apple-intel-mcp.manual-start` so the watchdog
+does not bootout the server you just asked for when no gateway happens to be
+running. The first poll that sees a gateway removes the marker and hands MCP back
+to the gateway-driven lifecycle; `stop.sh` and a reboot clear it too.
+
+> The plist asks for `StartInterval` 3, but launchd throttles repeating jobs to a
+> ten-second floor, so a poll actually lands about every 10 s. Sizing anything
+> around the shorter figure will disappoint.
 
 > Implementation note: the watchdog script is copied into
 > `~/Library/Application Support/apple-intel-mcp/` at install time, because
@@ -440,7 +499,7 @@ bash uninstall.sh   # removes mcp + watchdog (if installed)
                    │  (stdio  OR  streamable-http :11435)
                    ▼
 ┌────────────────────────────────────────────┐
-│   Python FastMCP server                    │
+│   Python MCP server (mcp SDK 2.x)          │
 │   mcp-server/server.py                     │
 │   - 21 @mcp.tool definitions               │
 │   - SwiftBridge: persistent subprocess +   │
@@ -466,7 +525,7 @@ bash uninstall.sh   # removes mcp + watchdog (if installed)
        SoundAnalysis     ←─ audio classification
 ```
 
-**Why two processes?** FastMCP is Python-native; Apple AI frameworks are
+**Why two processes?** The MCP Python SDK is Python-native; Apple AI frameworks are
 Swift-only. The Swift binary stays resident so frameworks (which take seconds
 to initialize) load once. The Python layer is thin — it handles MCP protocol,
 schema/description, and serialization. Each `await bridge.call(...)` writes one
@@ -531,11 +590,11 @@ apple-intelligence-mcp/
 ├── bin/
 │   └── mcp-watchdog.sh            # polls hermes/openclaw gateways, syncs mcp state
 ├── mcp-server/
-│   ├── server.py                  # FastMCP server + SwiftBridge (~690 LOC)
-│   └── requirements.txt           # mcp>=1.0.0
+│   ├── server.py                  # MCPServer + SwiftBridge (~780 LOC)
+│   └── requirements.txt           # mcp>=2,<3
 ├── swift-core/
 │   ├── Package.swift              # macOS 26, Swift 6
-│   └── Sources/AppleIntelCore/    # ~2,500 LOC, one handler per framework
+│   └── Sources/AppleIntelCore/    # ~2,650 LOC, one handler per framework
 │       ├── main.swift             # entry point
 │       ├── CoreService.swift      # request router
 │       ├── Models.swift           # IPC types

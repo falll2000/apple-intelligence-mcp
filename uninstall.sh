@@ -24,6 +24,7 @@ launchctl unload "$PLIST_SWIFT" 2>/dev/null || true
 
 rm -f "$PLIST_MCP" "$PLIST_SWIFT"
 rm -rf "$HOME/Library/Application Support/apple-intel-mcp"
+rm -f /tmp/apple-intel-mcp.manual-start
 rm -f /tmp/apple-intel-mcp.watchdog-pids /tmp/apple-intel-mcp.hermes-pid /tmp/apple-intel-mcp.openclaw-pid
 rm -f /tmp/apple-intel-mcp.watchdog.log /tmp/apple-intel-mcp.hermes-watchdog.log /tmp/apple-intel-mcp.openclaw-watchdog.log
 echo "launchd configuration removed"

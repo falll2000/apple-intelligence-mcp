@@ -6,15 +6,48 @@ import NaturalLanguage
 struct AnalyzeHandler: Sendable {
 
     // Sentiment analysis: returns -1.0 (very negative) to 1.0 (very positive).
+    //
+    // NLTagger scores one paragraph at a time, so asking for the tag at
+    // text.startIndex only ever returns the FIRST paragraph and silently drops the
+    // rest of a multi-paragraph input. Walk every paragraph instead and combine
+    // them, weighted by length: a one-line aside should not outweigh the long
+    // paragraph next to it. Paragraphs the tagger cannot score are skipped rather
+    // than counted as neutral, which would drag the result toward zero.
     func analyzeSentiment(text: String) -> Double {
+        guard !text.isEmpty else { return 0.0 }
+
         let tagger = NLTagger(tagSchemes: [.sentimentScore])
         tagger.string = text
-        let (tag, _) = tagger.tag(
+
+        // NLTagger has no sentiment model for every language (Chinese among them) and
+        // signals that by tagging the document "Other" instead of a number. In that
+        // state its per-paragraph scores are noise: the same Traditional Chinese
+        // sentence measures 0.0 as the first paragraph and -0.6 as the third, so
+        // averaging them invents a confident-looking verdict out of nothing. Report
+        // neutral instead, which is what the single-paragraph code did anyway.
+        let (documentTag, _) = tagger.tag(
             at: text.startIndex,
             unit: .paragraph,
             scheme: .sentimentScore
         )
-        return tag.flatMap { Double($0.rawValue) } ?? 0.0
+        guard let documentTag, Double(documentTag.rawValue) != nil else { return 0.0 }
+
+        var weightedSum = 0.0
+        var totalWeight = 0.0
+        tagger.enumerateTags(
+            in: text.startIndex..<text.endIndex,
+            unit: .paragraph,
+            scheme: .sentimentScore,
+            options: [.omitWhitespace]
+        ) { tag, range in
+            guard let score = tag.flatMap({ Double($0.rawValue) }) else { return true }
+            let weight = Double(text[range].trimmingCharacters(in: .whitespacesAndNewlines).count)
+            guard weight > 0 else { return true }
+            weightedSum += score * weight
+            totalWeight += weight
+            return true
+        }
+        return totalWeight > 0 ? weightedSum / totalWeight : 0.0
     }
 
     // Language detection

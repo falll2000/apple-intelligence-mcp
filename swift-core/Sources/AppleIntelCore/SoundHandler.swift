@@ -17,8 +17,13 @@ struct SoundHandler: Sendable {
                 try analyzer.add(request, withObserver: observer)
                 
                 // Run analysis on a background queue so it does not block the Swift Concurrency cooperative thread pool.
+                // SNAudioFileAnalyzer keeps only a weak reference to the observer, so it has
+                // to be held here for the duration of the analysis. Without this it is
+                // deallocated before analyze() delivers anything, no callback ever fires,
+                // and the continuation leaks — classify_sound then hangs forever.
                 DispatchQueue.global(qos: .userInitiated).async {
                     analyzer.analyze()
+                    withExtendedLifetime(observer) {}
                 }
             } catch {
                 continuation.resume(throwing: error)
