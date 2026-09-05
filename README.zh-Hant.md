@@ -326,7 +326,9 @@ hermes 的 `mcp_servers.<name>.tools.exclude`），這樣 host LLM 就不會把�
 **`detect_objects`** 需要你自備 Core ML 模型（`.mlmodel` 或 `.mlmodelc`）。
 其他工具都開箱即用。
 
-**`detect_trajectories`** 需要 mp4 / mov 影片，對拋物線運動（球類運動）效果最好。
+**`detect_trajectories`** 需要 AVFoundation 打得開的容器，也就是 mp4 或 mov。
+WebM/VP9 會直接回 `Cannot Open`，請先轉成 mp4。它找的是固定機位下沿拋物線運動
+的物體（球類運動），最多讀 300 幀。
 
 **`body_pose_3d` 已經從公開 mode 列表移掉。**
 `VNDetectHumanBodyPose3DRequest` 在跑 `perform` 時會丟出 Swift 接不到的
@@ -556,11 +558,11 @@ apple-intelligence-mcp/
 ├── bin/
 │   └── mcp-watchdog.sh            # 輪詢 hermes/openclaw gateway，連動 mcp 狀態
 ├── mcp-server/
-│   ├── server.py                  # MCPServer + SwiftBridge（約 720 行）
+│   ├── server.py                  # MCPServer + SwiftBridge（約 780 行）
 │   └── requirements.txt           # mcp>=2,<3
 ├── swift-core/
 │   ├── Package.swift              # macOS 26、Swift 6
-│   └── Sources/AppleIntelCore/    # 約 2,500 行，一個 framework 一支 handler
+│   └── Sources/AppleIntelCore/    # 約 2,650 行，一個 framework 一支 handler
 │       ├── main.swift             # 進入點
 │       ├── CoreService.swift      # 請求路由
 │       ├── Models.swift           # IPC 型別

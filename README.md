@@ -333,8 +333,10 @@ might trigger it.
 **`detect_objects`** requires a user-supplied Core ML model (`.mlmodel` or
 `.mlmodelc`). All other tools work out of the box.
 
-**`detect_trajectories`** requires a video file (mp4/mov). Works best with
-footage of objects following a parabolic path (sports, balls).
+**`detect_trajectories`** needs a container AVFoundation can open — mp4 or mov.
+WebM/VP9 fails with `Cannot Open`, so remux those to mp4 first. It looks for
+objects following a parabolic path (sports, balls) against a stationary camera,
+and reads at most 300 frames.
 
 **`body_pose_3d` is removed from the public mode list.**
 `VNDetectHumanBodyPose3DRequest` terminates the Swift Core process with an
@@ -588,11 +590,11 @@ apple-intelligence-mcp/
 ├── bin/
 │   └── mcp-watchdog.sh            # polls hermes/openclaw gateways, syncs mcp state
 ├── mcp-server/
-│   ├── server.py                  # MCPServer + SwiftBridge (~720 LOC)
+│   ├── server.py                  # MCPServer + SwiftBridge (~780 LOC)
 │   └── requirements.txt           # mcp>=2,<3
 ├── swift-core/
 │   ├── Package.swift              # macOS 26, Swift 6
-│   └── Sources/AppleIntelCore/    # ~2,500 LOC, one handler per framework
+│   └── Sources/AppleIntelCore/    # ~2,650 LOC, one handler per framework
 │       ├── main.swift             # entry point
 │       ├── CoreService.swift      # request router
 │       ├── Models.swift           # IPC types
