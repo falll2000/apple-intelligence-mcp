@@ -29,14 +29,18 @@ struct TranscribeHandler: Sendable {
         request.addsPunctuation = true
         request.taskHint = .dictation
 
+        // SFSpeechRecognizer can invoke this callback more than once (a final result
+        // followed by an error, or an error after cancellation). Guard the continuation
+        // so a second resume does not trap and kill the whole Core Service process.
         return try await withCheckedThrowingContinuation { continuation in
+            let resumer = ContinuationResumer(continuation)
             recognizer.recognitionTask(with: request) { result, error in
                 if let error = error {
-                    continuation.resume(throwing: error)
+                    resumer.resume(throwing: error)
                     return
                 }
                 if let result = result, result.isFinal {
-                    continuation.resume(returning: result.bestTranscription.formattedString)
+                    resumer.resume(returning: result.bestTranscription.formattedString)
                 }
             }
         }

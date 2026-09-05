@@ -33,6 +33,10 @@ log = logging.getLogger("apple-intel-mcp")
 SCRIPT_DIR = Path(__file__).parent.parent
 SWIFT_BIN = SCRIPT_DIR / "swift-core" / ".build" / "release" / "AppleIntelCore"
 
+# Upper bound for one Swift Core round-trip. Without it, a handler whose framework
+# callback never fires would hold the bridge lock forever and wedge every later call.
+CALL_TIMEOUT_SECONDS = float(os.environ.get("APPLE_INTEL_CALL_TIMEOUT", "300"))
+
 
 class SwiftBridge:
     """Manage the Swift Core Service lifecycle and IPC."""
@@ -60,9 +64,26 @@ class SwiftBridge:
             ready_line = self._proc.stdout.readline()
             log.info(f"Swift Core response: {ready_line.strip()}")
 
+    def _exchange(self, line: str) -> str:
+        """One blocking request/response round-trip.
+
+        Runs in a worker thread so asyncio.wait_for can actually interrupt it and so
+        pipe I/O does not stall the event loop for the duration of a Swift call.
+        """
+        self._ensure_started()
+        self._proc.stdin.write(line)
+        self._proc.stdin.flush()
+        return self._proc.stdout.readline()
+
+    def _discard(self):
+        """Kill and reap a broken Swift Core so it cannot linger as an orphan."""
+        proc, self._proc = self._proc, None
+        if proc is not None and proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
     async def call(self, tool: str, params: dict) -> dict:
         async with self._lock:
-            self._ensure_started()
             request = {
                 "id": str(uuid.uuid4()),
                 "tool": tool,
@@ -70,14 +91,22 @@ class SwiftBridge:
             }
             line = json.dumps(request, ensure_ascii=False) + "\n"
             try:
-                self._proc.stdin.write(line)
-                self._proc.stdin.flush()
-                response_line = self._proc.stdout.readline()
+                response_line = await asyncio.wait_for(
+                    asyncio.to_thread(self._exchange, line),
+                    timeout=CALL_TIMEOUT_SECONDS,
+                )
                 if not response_line:
                     raise RuntimeError("Swift Core did not respond (process may have exited)")
                 return json.loads(response_line)
+            except asyncio.TimeoutError:
+                # Killing the process unblocks the worker thread still sitting in readline.
+                self._discard()
+                raise RuntimeError(
+                    f"Swift Core timed out after {CALL_TIMEOUT_SECONDS:.0f}s on '{tool}'. "
+                    "It was restarted; retry the call."
+                ) from None
             except Exception as e:
-                self._proc = None
+                self._discard()
                 raise RuntimeError(f"Swift Core communication failed: {e}")
 
     def shutdown(self):
