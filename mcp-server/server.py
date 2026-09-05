@@ -20,7 +20,8 @@ import uuid
 import logging
 from pathlib import Path
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
 logging.basicConfig(
@@ -102,13 +103,13 @@ class SwiftBridge:
             except asyncio.TimeoutError:
                 # Killing the process unblocks the worker thread still sitting in readline.
                 self._discard()
-                raise RuntimeError(
+                raise ToolError(
                     f"Swift Core timed out after {CALL_TIMEOUT_SECONDS:.0f}s on '{tool}'. "
                     "It was restarted; retry the call."
                 ) from None
             except Exception as e:
                 self._discard()
-                raise RuntimeError(f"Swift Core communication failed: {e}")
+                raise ToolError(f"Swift Core communication failed: {e}")
 
     def shutdown(self):
         if self._proc and self._proc.poll() is None:
@@ -118,7 +119,7 @@ class SwiftBridge:
 
 def _unwrap(result: dict, key: str | None = None):
     if not result.get("success"):
-        raise RuntimeError(result.get("error", "Unknown error"))
+        raise ToolError(result.get("error", "Unknown error"))
     payload = result["result"]
     if key is not None:
         return payload[key]
@@ -127,7 +128,7 @@ def _unwrap(result: dict, key: str | None = None):
 
 bridge = SwiftBridge()
 
-mcp = FastMCP(
+mcp = MCPServer(
     "Apple Intelligence",
     instructions=(
         "Local on-device AI tools running entirely on Apple Silicon. "
@@ -247,7 +248,7 @@ async def vision_analyze(
     """
     swift_tool = _VISION_MODES.get(mode)
     if swift_tool is None:
-        raise RuntimeError(
+        raise ToolError(
             f"Unknown mode: {mode!r}. Available modes: {', '.join(sorted(_VISION_MODES))}"
         )
     params: dict = {"image_path": image_path}
@@ -716,7 +717,5 @@ if __name__ == "__main__":
         mcp.run(transport="stdio")
     else:
         port = int(os.environ.get("APPLE_INTEL_PORT", "11435"))
-        mcp.settings.port = port
-        mcp.settings.host = "127.0.0.1"
         log.info(f"Apple Intelligence MCP Server starting (port {port})...")
-        mcp.run(transport="streamable-http")
+        mcp.run(transport="streamable-http", host="127.0.0.1", port=port)
