@@ -14,6 +14,7 @@ Swift Core: stdin/stdout JSON IPC (long-running subprocess)
 import asyncio
 import json
 import os
+import secrets
 import subprocess
 import sys
 import uuid
@@ -38,6 +39,10 @@ SWIFT_BIN = SCRIPT_DIR / "swift-core" / ".build" / "release" / "AppleIntelCore"
 # Upper bound for one Swift Core round-trip. Without it, a handler whose framework
 # callback never fires would hold the bridge lock forever and wedge every later call.
 CALL_TIMEOUT_SECONDS = float(os.environ.get("APPLE_INTEL_CALL_TIMEOUT", "300"))
+
+# Optional shared secret for the HTTP transport. Unset (the default) the server
+# behaves exactly as before and accepts any local caller.
+API_KEY = os.environ.get("APPLE_INTEL_API_KEY", "")
 
 
 class SwiftBridge:
@@ -710,6 +715,57 @@ except ImportError:
     pass
 
 
+def _bearer_guard(app, expected: str):
+    """Reject HTTP requests that do not carry the shared secret.
+
+    The server binds to loopback and the SDK's DNS-rebinding protection is on, so
+    a web page cannot reach it. What loopback does not separate is local accounts:
+    on a shared Mac any other user can call these tools, which read files as
+    whoever runs the server and, via synthesize_speech, write them too. Setting
+    APPLE_INTEL_API_KEY closes that gap. stdio needs none of this — it is a private
+    pipe to the parent process.
+    """
+    challenge = f"Bearer {expected}".encode("latin-1")
+
+    async def wrapped(scope, receive, send):
+        if scope["type"] == "http":
+            offered = dict(scope.get("headers") or []).get(b"authorization", b"")
+            if not secrets.compare_digest(offered, challenge):
+                body = b'{"error":"unauthorized"}'
+                await send({
+                    "type": "http.response.start",
+                    "status": 401,
+                    "headers": [
+                        (b"content-type", b"application/json"),
+                        (b"content-length", str(len(body)).encode()),
+                        (b"www-authenticate", b"Bearer"),
+                    ],
+                })
+                await send({"type": "http.response.body", "body": body})
+                return
+        await app(scope, receive, send)
+
+    return wrapped
+
+
+def _run_http(port: int):
+    """Serve streamable HTTP, wrapping the app in the bearer guard when a key is set."""
+    if not API_KEY:
+        mcp.run(transport="streamable-http", host="127.0.0.1", port=port)
+        return
+
+    import uvicorn
+
+    log.info("APPLE_INTEL_API_KEY is set; requiring Authorization: Bearer on /mcp")
+    app = mcp.streamable_http_app(host="127.0.0.1")
+    uvicorn.run(
+        _bearer_guard(app, API_KEY),
+        host="127.0.0.1",
+        port=port,
+        log_level=mcp.settings.log_level.lower(),
+    )
+
+
 # ─────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import atexit
@@ -721,4 +777,4 @@ if __name__ == "__main__":
     else:
         port = int(os.environ.get("APPLE_INTEL_PORT", "11435"))
         log.info(f"Apple Intelligence MCP Server starting (port {port})...")
-        mcp.run(transport="streamable-http", host="127.0.0.1", port=port)
+        _run_http(port)
