@@ -309,7 +309,7 @@ Apple 各 framework 對語言的支援度差很多。Vision、Speech、Foundatio
 | `generate_text` | ⚠ 短 prompt OK；知識截止約 2023 |
 | `classify_sound` | ⚠ 與語言無關，但排序偶爾不準 |
 | `analyze_text` | ✗ 中文情感永遠是 0 / 中性，命名實體幾乎抓不到 |
-| `tag_parts_of_speech` | ✗ 中文所有詞性都會標成「其他」 |
+| `tag_parts_of_speech` | ✗ 中文每個詞都會被標成 `other` |
 | `word_similarity` / `sentence_similarity` | ✗ 沒有載入中文 embedding 模型 |
 
 主要做中文場景時，建議在 host 的 MCP 設定層直接把 ✗ 那四支排除掉（例如

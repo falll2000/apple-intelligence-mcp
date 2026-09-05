@@ -315,7 +315,7 @@ NLEmbedding frameworks are essentially English-only on this stack.
 | `generate_text` | ⚠ short prompts OK; knowledge cutoff ~2023 |
 | `classify_sound` | ⚠ language-agnostic but ranking can be off |
 | `analyze_text` | ✗ Chinese sentiment always 0/中性, NER misses Chinese entities |
-| `tag_parts_of_speech` | ✗ Chinese tags all return as 「其他」 |
+| `tag_parts_of_speech` | ✗ every Chinese token comes back tagged `other` |
 | `word_similarity` / `sentence_similarity` | ✗ no Chinese embedding model |
 
 For Chinese-heavy deployments, exclude the four ✗ tools at the host's MCP
