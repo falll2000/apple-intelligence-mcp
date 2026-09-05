@@ -21,6 +21,7 @@ import logging
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 logging.basicConfig(
     level=logging.INFO,
@@ -163,6 +164,13 @@ mcp = FastMCP(
 )
 
 
+# Tool annotations. Every tool here reads local files or runs a local model;
+# only synthesize_speech writes to disk. Clients that gate tool calls on
+# readOnlyHint treat a missing annotation as write-capable, so declare it.
+_READ_ONLY = ToolAnnotations(readOnlyHint=True)
+_WRITES_FILE = ToolAnnotations(readOnlyHint=False)
+
+
 # ─────────────────────────────────────────────────────────────
 # Vision — single-image router
 # ─────────────────────────────────────────────────────────────
@@ -196,7 +204,7 @@ _VISION_MODES: dict[str, str] = {
 }
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def vision_analyze(
     image_path: str,
     mode: str,
@@ -252,7 +260,7 @@ async def vision_analyze(
 # Vision — multi-input / specialized (kept separate, different signatures)
 # ─────────────────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def image_similarity(
     image_path_1: str,
     image_path_2: str,
@@ -269,7 +277,7 @@ async def image_similarity(
     }))
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def detect_optical_flow(
     reference_path: str,
     target_path: str,
@@ -287,7 +295,7 @@ async def detect_optical_flow(
     }))
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def detect_trajectories(video_path: str) -> dict:
     """
     Detect parabolic trajectories (sports balls, projectiles) in a local video.
@@ -298,7 +306,7 @@ async def detect_trajectories(video_path: str) -> dict:
     return _unwrap(await bridge.call("detect_trajectories", {"video_path": video_path}))
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def detect_objects(
     image_path: str,
     model_path: str,
@@ -320,7 +328,7 @@ async def detect_objects(
 # Foundation Models — on-device LLM
 # ─────────────────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def generate_text(prompt: str, system_prompt: str = "") -> str:
     """
     Generate / rewrite / summarize text on the local Apple LLM.
@@ -342,7 +350,7 @@ async def generate_text(prompt: str, system_prompt: str = "") -> str:
     return _unwrap(await bridge.call("generate_text", params), key="text")
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def generate_text_structured(
     prompt: str,
     schema: str = "summarize",
@@ -406,7 +414,7 @@ async def generate_text_structured(
     return result
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def translate_text(text: str, to: str = "zh-Hant", from_lang: str = "auto") -> str:
     """
     Translate text using the on-device LLM.
@@ -433,7 +441,7 @@ async def translate_text(text: str, to: str = "zh-Hant", from_lang: str = "auto"
 # not generate from scratch. Discord-aware (preserves @mentions, :emoji:, code blocks).
 # ─────────────────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def proofread_text(text: str) -> str:
     """
     Fix typos, grammar, and punctuation in user-supplied text. Preserves tone, style,
@@ -453,7 +461,7 @@ async def proofread_text(text: str) -> str:
     return _unwrap(await bridge.call("proofread_text", {"text": text}), key="text")
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def rewrite_text(text: str, tone: str = "concise") -> str:
     """
     Rewrite user-supplied text in a different tone while preserving meaning,
@@ -478,7 +486,7 @@ async def rewrite_text(text: str, tone: str = "concise") -> str:
     }), key="text")
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def summarize_text(text: str, length: str = "medium") -> str:
     """
     Condense user-supplied text while preserving key info and language.
@@ -507,7 +515,7 @@ async def summarize_text(text: str, length: str = "medium") -> str:
 # Natural Language
 # ─────────────────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def analyze_text(text: str) -> dict:
     """
     Sentiment + language detection + NER (person/place/org) + keywords.
@@ -520,7 +528,7 @@ async def analyze_text(text: str) -> dict:
     return _unwrap(await bridge.call("analyze_text", {"text": text}))
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def tokenize_text(text: str, unit: str = "word") -> dict:
     """
     Split text into words, sentences, or paragraphs (multilingual).
@@ -535,7 +543,7 @@ async def tokenize_text(text: str, unit: str = "word") -> dict:
     return _unwrap(await bridge.call("tokenize_text", {"text": text, "unit": unit}))
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def tag_parts_of_speech(text: str) -> dict:
     """
     POS tagging (noun, verb, adjective, ...).
@@ -546,7 +554,7 @@ async def tag_parts_of_speech(text: str) -> dict:
     return _unwrap(await bridge.call("tag_parts_of_speech", {"text": text}))
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def lemmatize_text(text: str) -> dict:
     """
     Lemmatize each word to its base form (running→run, mice→mouse).
@@ -557,7 +565,7 @@ async def lemmatize_text(text: str) -> dict:
     return _unwrap(await bridge.call("lemmatize_text", {"text": text}))
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def word_similarity(
     word1: str,
     word2: str,
@@ -574,7 +582,7 @@ async def word_similarity(
     }))
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def sentence_similarity(
     sentence1: str,
     sentence2: str,
@@ -596,7 +604,7 @@ async def sentence_similarity(
 # Speech & Sound
 # ─────────────────────────────────────────────────────────────
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def transcribe_audio(audio_path: str, language: str = "zh-TW") -> str:
     """
     Offline speech-to-text on a local audio file.
@@ -614,7 +622,7 @@ async def transcribe_audio(audio_path: str, language: str = "zh-TW") -> str:
     }), key="text")
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def classify_sound(audio_path: str) -> dict:
     """
     Classify what kind of sound is in the audio (music, speech, laughter, dog bark, ...).
@@ -625,7 +633,7 @@ async def classify_sound(audio_path: str) -> dict:
     return _unwrap(await bridge.call("classify_sound", {"audio_path": audio_path}))
 
 
-@mcp.tool()
+@mcp.tool(annotations=_WRITES_FILE)
 async def synthesize_speech(
     text: str,
     voice: str = "",
@@ -664,7 +672,7 @@ async def synthesize_speech(
     return _unwrap(await bridge.call("synthesize_speech", params))
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 async def list_voices(language: str = "") -> dict:
     """
     List available macOS speech synthesis voices (helper for `synthesize_speech`).
