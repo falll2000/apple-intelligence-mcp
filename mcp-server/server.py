@@ -168,8 +168,11 @@ mcp = MCPServer(
 # Tool annotations. Every tool here reads local files or runs a local model;
 # only synthesize_speech writes to disk. Clients that gate tool calls on
 # readOnlyHint treat a missing annotation as write-capable, so declare it.
+# destructiveHint is spelled out for the writing tool rather than left unset:
+# synthesize_speech removes whatever sits at output_path before writing, and
+# hosts that read the full annotation set decide on that flag first.
 _READ_ONLY = ToolAnnotations(readOnlyHint=True)
-_WRITES_FILE = ToolAnnotations(readOnlyHint=False)
+_WRITES_FILE = ToolAnnotations(readOnlyHint=False, destructiveHint=True)
 
 
 # ─────────────────────────────────────────────────────────────
