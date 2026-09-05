@@ -17,6 +17,10 @@
 set -u
 
 MCP_LABEL="com.apple-intel-mcp.server"
+# start.sh drops this marker so a manually started MCP is not booted out three
+# seconds later when no gateway happens to be running. The first poll that sees
+# a consumer clears it again, handing MCP back to the gateway-driven lifecycle.
+PIN_FILE="/tmp/apple-intel-mcp.manual-start"
 CONSUMER_LABELS=("ai.hermes.gateway" "ai.openclaw.gateway")
 DOMAIN="gui/$(id -u)"
 PLIST_MCP="$HOME/Library/LaunchAgents/${MCP_LABEL}.plist"
@@ -32,12 +36,16 @@ mcp_loaded=0
 launchctl print "${DOMAIN}/${MCP_LABEL}" >/dev/null 2>&1 && mcp_loaded=1
 
 if [ "$any_present" = "0" ]; then
-    # every consumer is gone -> stop mcp
+    # every consumer is gone -> stop mcp, unless the operator pinned it up by hand
+    [ -f "$PIN_FILE" ] && exit 0
     if [ "$mcp_loaded" = "1" ]; then
         launchctl bootout "${DOMAIN}/${MCP_LABEL}" 2>/dev/null || true
     fi
     exit 0
 fi
+
+# a consumer is present: the gateway-driven lifecycle owns MCP again
+rm -f "$PIN_FILE"
 
 # at least one consumer present -> ensure mcp is up
 if [ "$mcp_loaded" = "0" ] && [ -f "$PLIST_MCP" ]; then

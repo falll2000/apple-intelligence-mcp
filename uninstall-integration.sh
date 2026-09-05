@@ -16,7 +16,8 @@ for L in com.apple-intel-mcp.watchdog com.apple-intel-mcp.hermes-watchdog com.ap
 done
 
 rm -f "$WATCHDOG_DIR/mcp-watchdog.sh" "$WATCHDOG_DIR/hermes-watchdog.sh" "$WATCHDOG_DIR/openclaw-watchdog.sh"
-rm -f /tmp/apple-intel-mcp.watchdog-pids /tmp/apple-intel-mcp.watchdog.log \
+rm -f /tmp/apple-intel-mcp.manual-start \
+      /tmp/apple-intel-mcp.watchdog-pids /tmp/apple-intel-mcp.watchdog.log \
       /tmp/apple-intel-mcp.hermes-pid /tmp/apple-intel-mcp.openclaw-pid \
       /tmp/apple-intel-mcp.hermes-watchdog.log /tmp/apple-intel-mcp.openclaw-watchdog.log
 echo "Watchdog configuration removed. MCP itself was not changed."
