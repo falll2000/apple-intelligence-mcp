@@ -107,7 +107,8 @@ http://127.0.0.1:11435/mcp
       "apple-intelligence": {
         "url": "http://127.0.0.1:11435/mcp",
         "transport": "streamable-http",
-        "connectionTimeoutMs": 10000
+        "connectionTimeoutMs": 10000,
+        "requestTimeoutMs": 300000
       }
     }
   }
@@ -118,19 +119,24 @@ http://127.0.0.1:11435/mcp
 
 ```bash
 openclaw mcp set apple-intelligence \
-  '{"url":"http://127.0.0.1:11435/mcp","transport":"streamable-http"}'
+  '{"url":"http://127.0.0.1:11435/mcp","transport":"streamable-http","requestTimeoutMs":300000}'
 openclaw mcp list                        # 確認已註冊
 openclaw mcp probe                       # 實際連線，列出它宣告了什麼
 ```
 
 用 `openclaw mcp configure apple-intelligence` 做 per-server 調整（OpenClaw 2026.9+）：
 
-| 旗標 | 用途 |
-|---|---|
-| `--include` / `--exclude` | 要曝露／隱藏的工具名，支援 `*` glob |
-| `--approval auto\|prompt\|approve` | 工具核准模式 |
-| `--timeout` / `--connect-timeout` | 單次請求與連線逾時（秒） |
-| `--parallel` | 標記此 server 可並行呼叫。設了無害，但 Swift bridge 內部本來就會串行化請求，不會變快 |
+| CLI 旗標 | `openclaw.json` 欄位 | 用途 |
+|---|---|---|
+| `--include` / `--exclude` | `toolFilter.include` / `toolFilter.exclude` | 要曝露／隱藏的工具名，支援 `*` glob |
+| `--approval auto\|prompt\|approve` | `codex.defaultToolsApprovalMode` | 工具核准模式 |
+| `--timeout` | `requestTimeoutMs` | 單次呼叫逾時。OpenClaw 預設 **60 秒**，遠低於本 server 自己的 300 秒防呆上界，請調高；否則長音檔轉寫、影片分析會在 server 還在跑的時候就被 client 放棄 |
+| `--connect-timeout` | `connectionTimeoutMs` | 連線逾時 |
+| `--parallel` | `supportsParallelToolCalls` | 不要開。OpenClaw 預設就是每台 server 串行；開了之後它會並發送出，而 Swift bridge 內部仍然串行化，排隊的那幾個只是在燒掉自己的逾時額度 |
+
+舊的欄位拼法（`timeout`、`connect_timeout`、`ssl_verify`、`client_cert`、
+`client_key`、`supports_parallel_tool_calls`、`workingDirectory`、`disabled`）在
+現行 OpenClaw 會直接被判為設定錯誤——用 `openclaw doctor --fix` 遷移。
 
 想改用 stdio（由 OpenClaw 拉起行程），就在 server 項目裡填上面 Claude Desktop 區塊
 那組相同的 `command` / `args`。
@@ -364,7 +370,11 @@ launchctl kickstart -k gui/$UID/com.apple-intel-mcp.server   # 強制重啟
 | 變數 | 預設 | 意義 |
 |---|---|---|
 | `APPLE_INTEL_PORT` | `11435` | HTTP 埠 |
-| `APPLE_INTEL_CALL_TIMEOUT` | `300` | 單次 Swift Core 呼叫的秒數上限，超過就殺掉並重啟它。請設得比 client 端的單次請求逾時還大 |
+| `APPLE_INTEL_CALL_TIMEOUT` | `300` | 單次 Swift Core 呼叫的秒數上限，超過就殺掉並重啟它 |
+
+`APPLE_INTEL_CALL_TIMEOUT` 是防當機用的上界，不是速度限制——只有在 Swift Core
+完全不回應時才會觸發。hermes 自己的工具呼叫預設也是 300 秒，兩邊本來就一致；
+OpenClaw 預設 60 秒，該調的是它的 `requestTimeoutMs`，不是把這個值降下來。
 
 ### Agent 生命週期整合（選用）
 

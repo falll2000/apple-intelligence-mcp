@@ -110,7 +110,8 @@ let OpenClaw spawn the process):
       "apple-intelligence": {
         "url": "http://127.0.0.1:11435/mcp",
         "transport": "streamable-http",
-        "connectionTimeoutMs": 10000
+        "connectionTimeoutMs": 10000,
+        "requestTimeoutMs": 300000
       }
     }
   }
@@ -121,19 +122,24 @@ Or register it from the CLI without editing the file:
 
 ```bash
 openclaw mcp set apple-intelligence \
-  '{"url":"http://127.0.0.1:11435/mcp","transport":"streamable-http"}'
+  '{"url":"http://127.0.0.1:11435/mcp","transport":"streamable-http","requestTimeoutMs":300000}'
 openclaw mcp list                        # verify it registered
 openclaw mcp probe                       # connect and list what it advertises
 ```
 
 Per-server tuning with `openclaw mcp configure apple-intelligence` (OpenClaw 2026.9+):
 
-| Flag | Use |
-|---|---|
-| `--include` / `--exclude` | Tool names or `*` globs to expose / hide |
-| `--approval auto\|prompt\|approve` | Tool-approval posture |
-| `--timeout` / `--connect-timeout` | Per-request and connection timeouts, in seconds |
-| `--parallel` | Marks the server safe for concurrent calls. Harmless, but the Swift bridge serializes requests internally, so it buys no throughput |
+| CLI flag | `openclaw.json` key | Use |
+|---|---|---|
+| `--include` / `--exclude` | `toolFilter.include` / `toolFilter.exclude` | Tool names or `*` globs to expose / hide |
+| `--approval auto\|prompt\|approve` | `codex.defaultToolsApprovalMode` | Tool-approval posture |
+| `--timeout` | `requestTimeoutMs` | Per-call timeout. OpenClaw defaults to **60 s** — well under this server's own 300 s guard — so raise it, or long transcriptions and video jobs get abandoned client-side while the server is still working |
+| `--connect-timeout` | `connectionTimeoutMs` | Connection timeout |
+| `--parallel` | `supportsParallelToolCalls` | Leave it off. OpenClaw is sequential per server by default; turning it on fires concurrent calls that the Swift bridge serializes anyway, so the queued ones spend their own timeout budget waiting |
+
+Older key spellings (`timeout`, `connect_timeout`, `ssl_verify`, `client_cert`,
+`client_key`, `supports_parallel_tool_calls`, `workingDirectory`, `disabled`) are
+rejected outright by current OpenClaw — run `openclaw doctor --fix` to migrate.
 
 For a stdio setup instead (OpenClaw spawns the process), use the same
 `command` / `args` as the Claude Desktop block above under the server entry.
@@ -374,7 +380,12 @@ directly):
 | Variable | Default | Meaning |
 |---|---|---|
 | `APPLE_INTEL_PORT` | `11435` | HTTP port |
-| `APPLE_INTEL_CALL_TIMEOUT` | `300` | Seconds one Swift Core call may take before the bridge kills and restarts it. Keep it above your client's per-request timeout |
+| `APPLE_INTEL_CALL_TIMEOUT` | `300` | Seconds one Swift Core call may take before the bridge kills and restarts it |
+
+`APPLE_INTEL_CALL_TIMEOUT` is a hang guard, not a speed limit — it only fires when
+the Swift Core stops answering at all. hermes ships a matching 300 s tool-call
+default, so the two already agree; OpenClaw defaults to 60 s, so raise
+`requestTimeoutMs` on that side rather than lowering this one.
 
 ### Agent lifecycle integration (optional)
 
