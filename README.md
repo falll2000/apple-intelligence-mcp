@@ -399,11 +399,11 @@ bash uninstall-integration.sh  # remove watchdog (keeps mcp running)
 ```
 
 This installs one launchd agent (`com.apple-intel-mcp.watchdog`) that polls
-every 3 s and keeps the MCP server alive while any gateway is up. It is
+on a short interval and keeps the MCP server alive while any gateway is up. It is
 **consumer-aware**: MCP stays up while **any** gateway is loaded and only stops
 once **all** are gone.
 
-| Gateway action | MCP reaction (≤ 3 s lag) |
+| Gateway action | MCP reaction (one poll of lag) |
 |---|---|
 | any gateway starts | `bootstrap` MCP |
 | all gateways stopped | `bootout` MCP |
@@ -437,6 +437,15 @@ Manual lifecycle scripts still work:
 bash stop.sh   # stops the watchdog first, then MCP
 bash start.sh  # starts MCP, then the watchdog if the integration is installed
 ```
+
+`start.sh` drops a marker at `/tmp/apple-intel-mcp.manual-start` so the watchdog
+does not bootout the server you just asked for when no gateway happens to be
+running. The first poll that sees a gateway removes the marker and hands MCP back
+to the gateway-driven lifecycle; `stop.sh` and a reboot clear it too.
+
+> The plist asks for `StartInterval` 3, but launchd throttles repeating jobs to a
+> ten-second floor, so a poll actually lands about every 10 s. Sizing anything
+> around the shorter figure will disappoint.
 
 > Implementation note: the watchdog script is copied into
 > `~/Library/Application Support/apple-intel-mcp/` at install time, because

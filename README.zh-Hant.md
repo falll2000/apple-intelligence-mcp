@@ -387,11 +387,11 @@ bash install-integration.sh    # 裝 watchdog
 bash uninstall-integration.sh  # 移除 watchdog（不影響 mcp 本體）
 ```
 
-這會裝一個 launchd agent（`com.apple-intel-mcp.watchdog`），每 3 秒輪詢這些
+這會裝一個 launchd agent（`com.apple-intel-mcp.watchdog`），定期輪詢這些
 gateway，只要有 gateway 在就讓 MCP 維持運行。它是 **consumer-aware**：只要**任一** gateway 還在，
 MCP 就維持；**全部**都停了才停 MCP。
 
-| Gateway 動作 | MCP 反應（最多 3 秒延遲） |
+| Gateway 動作 | MCP 反應（延遲一個輪詢週期） |
 |---|---|
 | 任一 gateway 啟動 | `bootstrap` MCP |
 | 全部 gateway 停止 | `bootout` MCP |
@@ -422,6 +422,14 @@ watchdog 是 interval job，所以兩次輪詢之間常會顯示 `spawn schedule
 bash stop.sh   # 先停 watchdog，再停 MCP
 bash start.sh  # 先啟動 MCP；若已安裝整合，也會啟動 watchdog
 ```
+
+`start.sh` 會在 `/tmp/apple-intel-mcp.manual-start` 放一個標記，這樣即使當下沒有
+任何 gateway 在跑，watchdog 也不會把你剛叫起來的 server 收掉。之後第一次輪詢
+看到 gateway 就會清掉標記，把 MCP 交還給 gateway 驅動的生命週期；`stop.sh` 和
+重開機也會清掉它。
+
+> plist 裡寫的是 `StartInterval` 3，但 launchd 對重複性工作有十秒下限，實際上
+> 大約每 10 秒才輪詢一次。不要照 3 秒去估算反應時間。
 
 > 實作小備註：watchdog 腳本在 install 時會複製一份到
 > `~/Library/Application Support/apple-intel-mcp/`，因為 macOS 26 launchd 拒絕
