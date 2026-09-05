@@ -298,8 +298,12 @@ struct VisionPoseHandler: Sendable {
 
         while reader.status == .reading, frameCount < 300 {
             guard let sample = readerOutput.copyNextSampleBuffer(),
-                  let pixelBuffer = CMSampleBufferGetImageBuffer(sample) else { break }
-            try sequenceHandler.perform([request], on: pixelBuffer)
+                  CMSampleBufferGetImageBuffer(sample) != nil else { break }
+            // Hand Vision the sample buffer, not its CVPixelBuffer: trajectory
+            // detection needs each frame's presentation timestamp to fit a curve
+            // over time, and a bare pixel buffer carries none. Passing one fails
+            // every frame with "No valid presentationTimeStamp was available".
+            try sequenceHandler.perform([request], on: sample)
             if let observations = request.results {
                 for obs in observations where !seen.contains(obs.uuid) {
                     seen.insert(obs.uuid)
