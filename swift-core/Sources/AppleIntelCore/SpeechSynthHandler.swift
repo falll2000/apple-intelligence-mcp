@@ -68,6 +68,11 @@ struct SpeechSynthHandler: Sendable {
             }
         }
 
+        // Release the AVAudioFile before anyone reads the path: AVFoundation only
+        // finalizes the WAV header when the file object goes away. Skipping this
+        // leaves a header claiming zero frames, so readers see a 0-second file.
+        writer.close()
+
         let duration = writer.duration
         let voiceUsed = utterance.voice?.identifier ?? "default"
 
@@ -116,6 +121,13 @@ private final class AudioFileWriter: @unchecked Sendable {
         }
         try file?.write(from: pcm)
         totalFrames += pcm.frameLength
+    }
+
+    /// Releasing the AVAudioFile is what writes the final WAV header.
+    func close() {
+        lock.lock()
+        defer { lock.unlock() }
+        file = nil
     }
 
     var duration: Double {
