@@ -69,7 +69,7 @@ bash install.sh
 腳本會自動：
 
 1. 編譯 Swift Core Service（`swift build -c release`）
-2. 建立 Python venv 並安裝 `mcp`（FastMCP）
+2. 建立 Python venv 並安裝 `mcp` Python SDK（2.x）
 3. 把服務 (`com.apple-intel-mcp.server`) 註冊成 launchd agent，listen on 11435
 4. 印出對應你電腦路徑的客戶端設定，可以直接複製貼上
 
@@ -120,7 +120,17 @@ http://127.0.0.1:11435/mcp
 openclaw mcp set apple-intelligence \
   '{"url":"http://127.0.0.1:11435/mcp","transport":"streamable-http"}'
 openclaw mcp list                        # 確認已註冊
+openclaw mcp probe                       # 實際連線，列出它宣告了什麼
 ```
+
+用 `openclaw mcp configure apple-intelligence` 做 per-server 調整（OpenClaw 2026.9+）：
+
+| 旗標 | 用途 |
+|---|---|
+| `--include` / `--exclude` | 要曝露／隱藏的工具名，支援 `*` glob |
+| `--approval auto\|prompt\|approve` | 工具核准模式 |
+| `--timeout` / `--connect-timeout` | 單次請求與連線逾時（秒） |
+| `--parallel` | 標記此 server 可並行呼叫。設了無害，但 Swift bridge 內部本來就會串行化請求，不會變快 |
 
 想改用 stdio（由 OpenClaw 拉起行程），就在 server 項目裡填上面 Claude Desktop 區塊
 那組相同的 `command` / `args`。
@@ -132,9 +142,15 @@ hermes mcp add apple-intelligence --url http://127.0.0.1:11435/mcp
 hermes mcp test apple-intelligence    # 驗證連線 + 工具列表
 ```
 
-不想曝露的工具，可在 `~/.hermes/config.yaml` 用
-`mcp_servers.apple-intelligence.tools.exclude` 排除——例如中文場景排掉那幾個
-只支援英文的 NL 工具（見[中文支援狀況](#中文支援狀況)）。
+`~/.hermes/config.yaml` 裡 `mcp_servers.apple-intelligence` 底下可用的 key：
+
+| Key | 用途 |
+|---|---|
+| `tools.exclude` / `tools.include` | 依名稱隱藏或設白名單——例如中文場景排掉那幾個只支援英文的 NL 工具（見[中文支援狀況](#中文支援狀況)） |
+| `trust: full \| untrusted` | 設 `untrusted` 時，會寫入的工具每次呼叫都要核准。本專案每支工具都宣告了 `readOnlyHint`，只有 `synthesize_speech` 例外，所以只有它會跳核准 |
+| `protocol: auto \| stateless \| legacy` | 握手世代；對本 server 用 `auto` 即可 |
+| `timeout` / `connect_timeout` / `keepalive_interval` | 秒 |
+| `lazy: true` | 首次使用時才連線，不在 gateway 啟動時連 |
 
 ### 推薦的 host system prompt
 
@@ -183,6 +199,10 @@ You should NOT use it for:
 
 18 種單張圖片的 Vision 任務被收進一支 `vision_analyze`（用 `mode` 參數路由），
 沒拆成 18 支獨立工具——實測這樣做能明顯提升 host LLM 選工具的準確度。
+
+每支工具都宣告了 MCP 的 `readOnlyHint` annotation，只有 `synthesize_speech` 會寫檔。
+會依 annotation 決定是否攔截呼叫的 host（OpenClaw 的核准模式、hermes 的 trust 分級）
+需要這個資訊，否則會把每支工具都當成有寫入風險。
 
 ### Foundation Models — 本機 LLM
 
@@ -339,6 +359,13 @@ tail -f /tmp/apple-intel-mcp.log                        # 看 log
 launchctl kickstart -k gui/$UID/com.apple-intel-mcp.server   # 強制重啟
 ```
 
+環境變數（寫在 launchd plist，或直接跑 `server.py` 時指定）：
+
+| 變數 | 預設 | 意義 |
+|---|---|---|
+| `APPLE_INTEL_PORT` | `11435` | HTTP 埠 |
+| `APPLE_INTEL_CALL_TIMEOUT` | `300` | 單次 Swift Core 呼叫的秒數上限，超過就殺掉並重啟它。請設得比 client 端的單次請求逾時還大 |
+
 ### Agent 生命週期整合（選用）
 
 如果你在跑 agent gateway——[hermes](https://github.com/NousResearch/hermes-agent)（`ai.hermes.gateway`）
@@ -419,7 +446,7 @@ bash uninstall.sh   # 移除 mcp + watchdog（如果裝過）
 ```mermaid
 flowchart TD
     Client["<b>AI 客戶端</b><br/>Claude / GPT / Gemini / 等"]
-    MCP["<b>Python FastMCP server</b><br/><code>mcp-server/server.py</code><br/>• 定義 21 個 <code>@mcp.tool</code><br/>• SwiftBridge：常駐 subprocess<br/>+ async lock + JSON line protocol"]
+    MCP["<b>Python MCP server（mcp SDK 2.x）</b><br/><code>mcp-server/server.py</code><br/>• 定義 21 個 <code>@mcp.tool</code><br/>• SwiftBridge：常駐 subprocess<br/>+ async lock + JSON line protocol"]
     Swift["<b>Swift Core Service</b>（常駐 process）<br/><code>swift-core/AppleIntelCore</code><br/>• <code>CoreService.swift</code>：請求路由<br/>• 各 framework 對應一支 handler<br/>• 啟動時把 Apple frameworks 載入一次"]
 
     FM["<b>FoundationModels</b><br/>本機 LLM（約 3B）"]
@@ -440,7 +467,7 @@ flowchart TD
 ```
 
 **為什麼要分兩個 process？**
-FastMCP 是 Python 原生套件；Apple AI 框架只有 Swift 能直接呼叫。Swift binary
+MCP Python SDK 是 Python 原生套件；Apple AI 框架只有 Swift 能直接呼叫。Swift binary
 做成常駐是因為這些框架光初始化就要好幾秒，每次重啟太慢。Python 那層很薄，
 只處理 MCP 協議、工具描述跟序列化。每次 `bridge.call(...)` 就是往 Swift stdin
 寫一行 JSON、從 stdout 讀回一行 JSON，外面包一層 `asyncio.Lock` 確保請求／
@@ -503,8 +530,8 @@ apple-intelligence-mcp/
 ├── bin/
 │   └── mcp-watchdog.sh            # 輪詢 hermes/openclaw gateway，連動 mcp 狀態
 ├── mcp-server/
-│   ├── server.py                  # FastMCP server + SwiftBridge（約 690 行）
-│   └── requirements.txt           # mcp>=1.0.0
+│   ├── server.py                  # MCPServer + SwiftBridge（約 720 行）
+│   └── requirements.txt           # mcp>=2,<3
 ├── swift-core/
 │   ├── Package.swift              # macOS 26、Swift 6
 │   └── Sources/AppleIntelCore/    # 約 2,500 行，一個 framework 一支 handler

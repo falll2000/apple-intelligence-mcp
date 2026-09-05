@@ -72,7 +72,7 @@ bash install.sh
 
 The script will:
 1. Compile the Swift Core Service (release build, `swift build -c release`)
-2. Create a Python venv and install `mcp` (FastMCP)
+2. Create a Python venv and install the `mcp` Python SDK (2.x)
 3. Register the server as a launchd agent (`com.apple-intel-mcp.server`) on port 11435
 4. Print the exact config snippet for your AI client
 
@@ -123,7 +123,17 @@ Or register it from the CLI without editing the file:
 openclaw mcp set apple-intelligence \
   '{"url":"http://127.0.0.1:11435/mcp","transport":"streamable-http"}'
 openclaw mcp list                        # verify it registered
+openclaw mcp probe                       # connect and list what it advertises
 ```
+
+Per-server tuning with `openclaw mcp configure apple-intelligence` (OpenClaw 2026.9+):
+
+| Flag | Use |
+|---|---|
+| `--include` / `--exclude` | Tool names or `*` globs to expose / hide |
+| `--approval auto\|prompt\|approve` | Tool-approval posture |
+| `--timeout` / `--connect-timeout` | Per-request and connection timeouts, in seconds |
+| `--parallel` | Marks the server safe for concurrent calls. Harmless, but the Swift bridge serializes requests internally, so it buys no throughput |
 
 For a stdio setup instead (OpenClaw spawns the process), use the same
 `command` / `args` as the Claude Desktop block above under the server entry.
@@ -135,9 +145,15 @@ hermes mcp add apple-intelligence --url http://127.0.0.1:11435/mcp
 hermes mcp test apple-intelligence    # verify connection + tool list
 ```
 
-Hide tools you don't want exposed via `mcp_servers.apple-intelligence.tools.exclude`
-in `~/.hermes/config.yaml` — e.g. the English-only NL tools for Chinese-heavy use
-(see [Language coverage](#language-coverage)).
+Per-server keys under `mcp_servers.apple-intelligence` in `~/.hermes/config.yaml`:
+
+| Key | Use |
+|---|---|
+| `tools.exclude` / `tools.include` | Hide or whitelist tools by name — e.g. exclude the English-only NL tools for Chinese-heavy use (see [Language coverage](#language-coverage)) |
+| `trust: full \| untrusted` | On `untrusted`, write-capable tools need approval per call. Every tool here declares `readOnlyHint` except `synthesize_speech`, so only that one prompts |
+| `protocol: auto \| stateless \| legacy` | Handshake era; `auto` is correct for this server |
+| `timeout` / `connect_timeout` / `keepalive_interval` | Seconds |
+| `lazy: true` | Connect on first use instead of at gateway startup |
 
 ### Recommended host system prompt
 
@@ -187,6 +203,10 @@ You should NOT use it for:
 The 18 single-image Vision capabilities are routed through one tool
 (`vision_analyze`) with a `mode` parameter, instead of 18 individual tools —
 this measurably improves host-LLM tool-selection accuracy.
+
+Every tool declares an MCP `readOnlyHint` annotation; `synthesize_speech` is the
+only one that writes to disk. Hosts that gate calls on annotations — OpenClaw's
+approval posture, hermes' trust tiers — depend on this being present.
 
 ### Foundation Models — on-device LLM
 
@@ -348,6 +368,14 @@ tail -f /tmp/apple-intel-mcp.log                        # logs
 launchctl kickstart -k gui/$UID/com.apple-intel-mcp.server   # force restart
 ```
 
+Environment variables (set them in the launchd plist, or when running `server.py`
+directly):
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `APPLE_INTEL_PORT` | `11435` | HTTP port |
+| `APPLE_INTEL_CALL_TIMEOUT` | `300` | Seconds one Swift Core call may take before the bridge kills and restarts it. Keep it above your client's per-request timeout |
+
 ### Agent lifecycle integration (optional)
 
 If you run an agent gateway — [hermes](https://github.com/NousResearch/hermes-agent) (`ai.hermes.gateway`)
@@ -440,7 +468,7 @@ bash uninstall.sh   # removes mcp + watchdog (if installed)
                    │  (stdio  OR  streamable-http :11435)
                    ▼
 ┌────────────────────────────────────────────┐
-│   Python FastMCP server                    │
+│   Python MCP server (mcp SDK 2.x)          │
 │   mcp-server/server.py                     │
 │   - 21 @mcp.tool definitions               │
 │   - SwiftBridge: persistent subprocess +   │
@@ -466,7 +494,7 @@ bash uninstall.sh   # removes mcp + watchdog (if installed)
        SoundAnalysis     ←─ audio classification
 ```
 
-**Why two processes?** FastMCP is Python-native; Apple AI frameworks are
+**Why two processes?** The MCP Python SDK is Python-native; Apple AI frameworks are
 Swift-only. The Swift binary stays resident so frameworks (which take seconds
 to initialize) load once. The Python layer is thin — it handles MCP protocol,
 schema/description, and serialization. Each `await bridge.call(...)` writes one
@@ -531,8 +559,8 @@ apple-intelligence-mcp/
 ├── bin/
 │   └── mcp-watchdog.sh            # polls hermes/openclaw gateways, syncs mcp state
 ├── mcp-server/
-│   ├── server.py                  # FastMCP server + SwiftBridge (~690 LOC)
-│   └── requirements.txt           # mcp>=1.0.0
+│   ├── server.py                  # MCPServer + SwiftBridge (~720 LOC)
+│   └── requirements.txt           # mcp>=2,<3
 ├── swift-core/
 │   ├── Package.swift              # macOS 26, Swift 6
 │   └── Sources/AppleIntelCore/    # ~2,500 LOC, one handler per framework
