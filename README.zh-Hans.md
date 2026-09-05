@@ -373,6 +373,14 @@ launchctl kickstart -k gui/$UID/com.apple-intel-mcp.server   # 强制重启
 |---|---|---|
 | `APPLE_INTEL_PORT` | `11435` | HTTP 端口 |
 | `APPLE_INTEL_CALL_TIMEOUT` | `300` | 单次 Swift Core 调用的秒数上限，超过就杀掉并重启它 |
+| `APPLE_INTEL_API_KEY` | 未设置 | 设了之后 `/mcp` 就要求 `Authorization: Bearer <值>`；不设则接受任何本机调用者 |
+
+要不要设 `APPLE_INTEL_API_KEY`，取决于这台机器还有谁在用。Server 只绑 loopback，
+且 SDK 的 DNS rebinding 防护是开的，所以网页碰不到它——但 loopback 不区分本机
+账号，而这些工具是以「运行 server 的那个用户」身份读文件（`synthesize_speech`
+还会写文件）。多人共用的 Mac 就该设。Client 端用 header 带进来：hermes 放
+`mcp_servers.<name>.headers`，OpenClaw 用 `openclaw mcp configure <name> --header`。
+走 stdio 的不需要，那是私有管道。
 
 `APPLE_INTEL_CALL_TIMEOUT` 是防死锁用的上界，不是速度限制——只有在 Swift Core
 完全不回应时才会触发。hermes 自己的工具调用默认也是 300 秒，两边本来就一致；

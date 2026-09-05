@@ -381,6 +381,15 @@ directly):
 |---|---|---|
 | `APPLE_INTEL_PORT` | `11435` | HTTP port |
 | `APPLE_INTEL_CALL_TIMEOUT` | `300` | Seconds one Swift Core call may take before the bridge kills and restarts it |
+| `APPLE_INTEL_API_KEY` | unset | When set, `/mcp` requires `Authorization: Bearer <value>`. Unset, any local caller is accepted |
+
+Whether you need `APPLE_INTEL_API_KEY` depends on who else uses the machine. The
+server binds to loopback and the SDK's DNS-rebinding protection is on, so a web
+page cannot reach it — but loopback does not separate local accounts, and these
+tools read files as whoever runs the server (and write them, via
+`synthesize_speech`). On a shared Mac, set it. Clients pass it as a header:
+hermes `mcp_servers.<name>.headers`, OpenClaw `openclaw mcp configure <name>
+--header`. stdio callers need nothing — that transport is a private pipe.
 
 `APPLE_INTEL_CALL_TIMEOUT` is a hang guard, not a speed limit — it only fires when
 the Swift Core stops answering at all. hermes ships a matching 300 s tool-call
